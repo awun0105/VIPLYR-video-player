@@ -4,7 +4,8 @@
 #include <QListWidget>
 #include <QStringList>
 #include <QLabel>
-// --- Slider Tùy biến ---
+
+// --- Custom Slider ---
 class SeekSlider : public QSlider
 {
     Q_OBJECT
@@ -14,7 +15,7 @@ protected:
     void mousePressEvent(QMouseEvent *ev) override;
 };
 
-// --- Thanh Điều khiển dưới cùng ---
+// --- Bottom Control Bar ---
 class ControlBar : public QWidget
 {
     Q_OBJECT
@@ -38,7 +39,7 @@ private:
     QLabel *timeLabel;
 };
 
-// --- Màn hình Khởi động Kéo/Thả ---
+// --- Drag & Drop Start Panel ---
 class StartPanel : public QWidget {
     Q_OBJECT
 public:

@@ -6,7 +6,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     MainWindow window;
 
-    // Hỗ trợ Open With
+    //Open With
     QStringList args = app.arguments();
     args.removeFirst();
     if (!args.isEmpty()) window.loadAndPlay(args);

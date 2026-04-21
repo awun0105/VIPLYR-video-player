@@ -50,10 +50,10 @@ void MainWindow::setupPlayerPanel() {
 }
 
 void MainWindow::wireConnections() {
-    // Luồng ứng dụng
+    // Application flow
     connect(startPanel, &StartPanel::filesReady, this, &MainWindow::loadAndPlay);
 
-    // Liên kết Điều khiển -> Engine
+    // Controls -> Engine connections
     connect(controls, &ControlBar::playClicked, engine, &MediaEngine::togglePlayback);
     connect(controls, &ControlBar::stopClicked, engine, &MediaEngine::stop);
     connect(controls, &ControlBar::nextClicked, engine, &MediaEngine::next);
@@ -62,7 +62,7 @@ void MainWindow::wireConnections() {
     connect(controls, &ControlBar::forwardClicked, engine, [this](){ engine->seekRelative(5000); });
     connect(canvas, &VideoCanvas::spacePressed, engine, &MediaEngine::togglePlayback);
 
-    // Liên kết Engine -> Thanh Slider
+    // Engine -> Seek slider connections
     SeekSlider *seek = controls->getSeekSlider();
     connect(engine->getPlayer(), &QMediaPlayer::positionChanged, [seek](qint64 pos){
         if (!seek->isSliderDown()) seek->setValue(pos);
@@ -71,10 +71,10 @@ void MainWindow::wireConnections() {
     connect(seek, &QSlider::sliderMoved, engine, &MediaEngine::seekTo);
     connect(controls->getVolSlider(), &QSlider::valueChanged, engine, &MediaEngine::setVolume);
 
-    // LIÊN KẾT ENGINE -> BỘ ĐẾM THỜI GIAN
+    // Engine -> Time display connections
     QLabel *timeLabel = controls->getTimeLabel();
 
-    // Tạo một hàm ẩn (lambda) để format mili-giây thành chuẩn hh:mm:ss
+    // Create a lambda to format milliseconds to hh:mm:ss
     auto formatTime = [](qint64 ms) -> QString {
         int seconds = (ms / 1000) % 60;
         int minutes = (ms / 60000) % 60;
@@ -84,19 +84,18 @@ void MainWindow::wireConnections() {
         return QString("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
     };
 
-    // Hàm cập nhật chữ lên màn hình
+    // Function to update the displayed time text
     auto updateTimeDisplay = [this, timeLabel, formatTime]() {
         qint64 pos = engine->getPlayer()->position();
         qint64 dur = engine->getPlayer()->duration();
         timeLabel->setText(formatTime(pos) + " / " + formatTime(dur));
     };
 
-    // Bắt sự kiện: Cứ mỗi khi video chạy 1 mili-giây, hoặc đổi video mới -> Cập nhật Text
+    // Event binding: update text whenever playback position or duration changes
     connect(engine->getPlayer(), &QMediaPlayer::positionChanged, this, updateTimeDisplay);
     connect(engine->getPlayer(), &QMediaPlayer::durationChanged, this, updateTimeDisplay);
 
-    // Liên kết Engine <-> Danh sách Playlist
-    // Liên kết Engine <-> Danh sách Playlist
+    // Engine <-> Playlist connections
     connect(engine->getPlaylist(), &QMediaPlaylist::currentIndexChanged, playlistUI, [this](int index){
         playlistUI->setCurrentRow(index);
     });
@@ -104,7 +103,7 @@ void MainWindow::wireConnections() {
 }
 
 void MainWindow::loadAndPlay(const QStringList &files) {
-    stack->setCurrentWidget(playerPanel); // Chuyển màn hình
+    stack->setCurrentWidget(playerPanel); // Switch to player panel
     for(const QString &f : files) playlistUI->addItem(QFileInfo(f).fileName());
     engine->loadFiles(files);
 }

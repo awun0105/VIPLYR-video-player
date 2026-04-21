@@ -7,7 +7,6 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt5 COMPONENTS Widgets Multimedia MultimediaWidgets REQUIRED)
 
-# Quét tất cả file .cpp trong thư mục src và các thư mục con
 file(GLOB_RECURSE SRC_FILES "src/*.cpp")
 
 add_executable(Viplyr ${SRC_FILES})

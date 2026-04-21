@@ -33,6 +33,6 @@ void VideoCanvas::wheelEvent(QWheelEvent *event) {
 
 void VideoCanvas::keyPressEvent(QKeyEvent *event) {
     if (event->key() == Qt::Key_R) rotate(90);
-    else if (event->key() == Qt::Key_Space) emit spacePressed(); // Báo cho UI ngoài biết để Play/Pause
+    else if (event->key() == Qt::Key_Space) emit spacePressed();
     else QGraphicsView::keyPressEvent(event);
 }

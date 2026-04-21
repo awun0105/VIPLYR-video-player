@@ -1,0 +1,5 @@
+/home/lqaq/PROJECT/C++/VIPLYR-video-player/build/CMakeFiles/Viplyr.dir
+/home/lqaq/PROJECT/C++/VIPLYR-video-player/build/CMakeFiles/edit_cache.dir
+/home/lqaq/PROJECT/C++/VIPLYR-video-player/build/CMakeFiles/rebuild_cache.dir
+/home/lqaq/PROJECT/C++/VIPLYR-video-player/build/CMakeFiles/Viplyr_autogen_timestamp_deps.dir
+/home/lqaq/PROJECT/C++/VIPLYR-video-player/build/CMakeFiles/Viplyr_autogen.dir

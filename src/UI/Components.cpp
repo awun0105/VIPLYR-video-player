@@ -73,14 +73,14 @@ StartPanel::StartPanel(QWidget *parent) : QWidget(parent) {
     layout->setAlignment(Qt::AlignCenter);
 
     QLabel *icon = new QLabel("🎬", this); icon->setStyleSheet("font-size: 70px;"); icon->setAlignment(Qt::AlignCenter);
-    QLabel *title = new QLabel("KÉO THẢ VIDEO VÀO ĐÂY", this); title->setStyleSheet("font-size: 24px; color: #888; font-weight: bold;"); title->setAlignment(Qt::AlignCenter);
-    QPushButton *btnSelect = new QPushButton("Chọn File Từ Máy Tính", this);
+    QLabel *title = new QLabel("DROP YOUR VIDEOS HERE", this); title->setStyleSheet("font-size: 24px; color: #888; font-weight: bold;"); title->setAlignment(Qt::AlignCenter);
+    QPushButton *btnSelect = new QPushButton("Choose file", this);
     btnSelect->setFixedSize(250, 50); btnSelect->setStyleSheet("background-color: #1E90FF; border-radius: 8px; font-weight:bold; font-size: 16px; border:none;");
 
     layout->addWidget(icon); layout->addWidget(title); layout->addWidget(btnSelect, 0, Qt::AlignHCenter);
 
     connect(btnSelect, &QPushButton::clicked, this, [this](){
-        QStringList files = QFileDialog::getOpenFileNames(this, "Chọn Video", "", "Video (*.*)");
+        QStringList files = QFileDialog::getOpenFileNames(this, "Choose Video", "", "Video (*.*)");
         if(!files.isEmpty()) emit filesReady(files);
     });
 }
