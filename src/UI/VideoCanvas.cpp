@@ -1,17 +1,14 @@
-#include "PlayerView.h"
+#include "VideoCanvas.h"
 #include <QGraphicsScene>
 #include <QWheelEvent>
 #include <QKeyEvent>
 
-PlayerView::PlayerView(QWidget *parent) : QGraphicsView(parent) {
+VideoCanvas::VideoCanvas(QWidget *parent) : QGraphicsView(parent) {
     QGraphicsScene *scene = new QGraphicsScene(this);
     setScene(scene);
 
     videoItem = new QGraphicsVideoItem;
     scene->addItem(videoItem);
-
-    player = new QMediaPlayer(this);
-    player->setVideoOutput(videoItem);
 
     setDragMode(QGraphicsView::ScrollHandDrag);
     setRenderHint(QPainter::Antialiasing);
@@ -27,23 +24,15 @@ PlayerView::PlayerView(QWidget *parent) : QGraphicsView(parent) {
     });
 }
 
-void PlayerView::wheelEvent(QWheelEvent *event) {
+void VideoCanvas::wheelEvent(QWheelEvent *event) {
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     double scaleFactor = 1.15;
     if (event->angleDelta().y() > 0) scale(scaleFactor, scaleFactor);
     else scale(1.0 / scaleFactor, 1.0 / scaleFactor);
 }
 
-void PlayerView::keyPressEvent(QKeyEvent *event) {
-    switch (event->key()) {
-        case Qt::Key_R:
-            rotate(90);
-            break;
-        case Qt::Key_Space:
-            if (player->state() == QMediaPlayer::PlayingState) player->pause();
-            else player->play();
-            break;
-        default:
-            QGraphicsView::keyPressEvent(event);
-    }
+void VideoCanvas::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_R) rotate(90);
+    else if (event->key() == Qt::Key_Space) emit spacePressed(); // Báo cho UI ngoài biết để Play/Pause
+    else QGraphicsView::keyPressEvent(event);
 }
