@@ -4,7 +4,11 @@
 `src/` contains all application code. `src/Core/` holds playback logic (`MediaEngine`), `src/UI/` contains Qt widgets and window orchestration, and `src/Utils/Theme.h` centralizes UI styling. `src/main.cpp` is the entry point. Static assets live in `icon/`. Build artifacts are generated under `build/` and should not be committed.
 
 ## Build, Test, and Development Commands
-- `./build.sh`: removes `build/`, configures CMake with Ninja, and compiles the app.
+- `./setup.sh`: removes `build/`, configures CMake with Ninja, and compiles the app.
+- `make setup`: same as `./setup.sh`.
+- `make build`: incremental rebuild using Ninja (fast after small changes).
+- `make run`: run the app (`./build/Viplyr`).
+- `make` / `make start`: build then run.
 - `cmake -S . -B build -G Ninja`: configure manually without running the full script.
 - `cmake --build build`: rebuild from an existing configured `build/` directory.
 - `./build/Viplyr`: run the desktop player locally after a successful build.
@@ -20,7 +24,7 @@ Follow the existing C++11 and Qt style in `src/`: 4-space indentation, opening b
 
 ## Testing Guidelines
 There is currently no automated test suite in this repository. For changes, at minimum:
-- rebuild with `./build.sh`
+- rebuild with `make build` (or `./setup.sh` if you need a clean reconfigure)
 - launch `./build/Viplyr`
 - manually verify file loading, playback controls, seeking, and drag-and-drop behavior
 

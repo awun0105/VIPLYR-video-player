@@ -13,8 +13,9 @@ The project is well-organized by strictly separating the **User Interface (UI)**
 
 ```text
 Viplyr/
-├── build.sh                 # Script to clean and build the project
+├── Makefile                 # Convenience targets: build/run/setup/clean
 ├── CMakeLists.txt           # CMake configuration file
+├── setup.sh                 # Clean + configure (CMake) + build (Ninja)
 │
 ├── icon/
 │   └── viplyr_icon.png      # Application icon
@@ -57,13 +58,18 @@ All connections between UI and Core are centralized in one function called `wire
 ## 3. Key Features
 
 - **Drag & Drop**: Simply drag video files (or multiple files) and drop them into the player window to start playing.
-- **Playback Controls**: Play, Pause, Stop, and skip ±5 seconds.
+- **Playback Controls**: Play/Pause, Stop, Next/Prev, and skip ±5 seconds.
 - **Smart Seeking**: Click anywhere on the timeline to jump to that exact time (no need to drag the slider).
 - **Real-time Duration**: Shows current time and total duration in `00:00:00 / 01:23:45` format.
 - **Spatial Transformations**:
   - **Zoom & Pan**: Scroll the mouse wheel to zoom in/out, hold left-click and drag to pan the video.
-  - **Rotate**: Click the ↺ or ↻ buttons, or press the **R** key to rotate the video 90 degrees.
-- **Playlist**: Automatically creates a playlist when you drop multiple files and plays the next file automatically.
+  - **Rotate**: Press the **R** key to rotate the video 90 degrees.
+- **Fullscreen**: Double click on the video to toggle fullscreen. Press **Esc** to exit fullscreen.
+- **Playlist**:
+  - Drop multiple files to build a playlist and auto-play sequentially.
+  - Add more videos later via the playlist **Add** button or drag-and-drop into the playlist panel (duplicates are ignored).
+  - Remove the selected item with **Remove**.
+  - Hide/show the playlist from the control bar.
 
 ---
 
@@ -105,19 +111,29 @@ git clone https://github.com/awun0105/VIPLYR-video-player.git
 cd VIPLYR-video-player
 ```
 
-2. Run the build script:
+2. Configure and build:
 ```bash
-chmod +x build.sh
-./build.sh
+chmod +x setup.sh
+./setup.sh
 ```
 
 After a successful build, the executable will be located at `build/Viplyr`.
+
+For incremental rebuilds after editing code:
+```bash
+make build
+```
 
 ### How to Launch Viplyr
 
 **Method 1: Run directly from terminal (for development)**
 ```bash
 ./build/Viplyr
+```
+
+Or use:
+```bash
+make run
 ```
 
 **Method 2: Install as a regular desktop application** (recommended for daily use)
@@ -127,7 +143,8 @@ After a successful build, the executable will be located at `build/Viplyr`.
 sudo cp build/Viplyr /usr/local/bin/Viplyr
 
 # Copy the icon
-cp icon/Viplyr_icon.png ~/.local/share/icons/Viplyr_icon.png
+mkdir -p ~/.local/share/icons
+cp icon/viplyr_icon.png ~/.local/share/icons/viplyr_icon.png
 
 # Create desktop entry
 mkdir -p ~/.local/share/applications
@@ -135,7 +152,7 @@ cat > ~/.local/share/applications/Viplyr.desktop << EOF
 [Desktop Entry]
 Name=Viplyr
 Exec=/usr/local/bin/Viplyr
-Icon=Viplyr_icon
+Icon=viplyr_icon
 Type=Application
 Categories=AudioVideo;Player;Video;
 MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;
@@ -146,3 +163,12 @@ update-desktop-database ~/.local/share/applications/
 ```
 
 Now you can search for “Viplyr” in your application menu and use it like any other installed program.
+
+---
+
+## 6. Controls
+
+- `Space`: Play/Pause
+- `R`: Rotate 90 degrees
+- Double click video: Toggle fullscreen
+- `Esc`: Exit fullscreen
