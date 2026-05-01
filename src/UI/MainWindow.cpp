@@ -6,8 +6,11 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFileInfo>
+#include <QKeyEvent>
+#include <QSignalBlocker>
+#include <QSet>
 
-MainWindow::MainWindow(QWidget *parent) : QWidget(parent) {
+MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true) {
     setWindowTitle("Viplyr - video player");
     resize(1100, 650);
     setStyleSheet(Theme::WindowBg);
@@ -31,12 +34,13 @@ void MainWindow::setupPlayerPanel() {
     engine = new MediaEngine(this);
     canvas = new VideoCanvas;
     controls = new ControlBar;
+    playlistPanel = new PlaylistPanel;
 
     engine->bindVideoOutput(canvas->getVideoItem());
 
-    playlistUI = new QListWidget;
-    playlistUI->setFixedWidth(250);
-    playlistUI->setStyleSheet(Theme::PanelBg + Theme::PlaylistItem);
+    playlistUI = playlistPanel->getListWidget();
+    playlistPanel->setFixedWidth(280);
+    controls->setPlaylistVisible(playlistVisible);
 
     QHBoxLayout *hLayout = new QHBoxLayout(playerPanel);
     hLayout->setContentsMargins(0,0,0,0); hLayout->setSpacing(0);
@@ -46,12 +50,14 @@ void MainWindow::setupPlayerPanel() {
     vLayout->addWidget(controls);
 
     hLayout->addLayout(vLayout, 1);
-    hLayout->addWidget(playlistUI);
+    hLayout->addWidget(playlistPanel);
 }
 
 void MainWindow::wireConnections() {
     // Application flow
     connect(startPanel, &StartPanel::filesReady, this, &MainWindow::loadAndPlay);
+    connect(playlistPanel, &PlaylistPanel::filesAppendRequested, this, &MainWindow::appendFiles);
+    connect(playlistPanel, &PlaylistPanel::removeSelectedRequested, this, &MainWindow::removeSelectedPlaylistItem);
 
     // Controls -> Engine connections
     connect(controls, &ControlBar::playClicked, engine, &MediaEngine::togglePlayback);
@@ -60,7 +66,12 @@ void MainWindow::wireConnections() {
     connect(controls, &ControlBar::prevClicked, engine, &MediaEngine::previous);
     connect(controls, &ControlBar::rewindClicked, engine, [this](){ engine->seekRelative(-5000); });
     connect(controls, &ControlBar::forwardClicked, engine, [this](){ engine->seekRelative(5000); });
+    connect(controls, &ControlBar::playlistToggleRequested, this, &MainWindow::togglePlaylistVisibility);
     connect(canvas, &VideoCanvas::spacePressed, engine, &MediaEngine::togglePlayback);
+    connect(canvas, &VideoCanvas::fullscreenToggleRequested, this, &MainWindow::toggleFullscreen);
+    connect(canvas, &VideoCanvas::exitFullscreenRequested, this, [this]() {
+        if (isFullScreen()) toggleFullscreen();
+    });
 
     // Engine -> Seek slider connections
     SeekSlider *seek = controls->getSeekSlider();
@@ -94,16 +105,89 @@ void MainWindow::wireConnections() {
     // Event binding: update text whenever playback position or duration changes
     connect(engine->getPlayer(), &QMediaPlayer::positionChanged, this, updateTimeDisplay);
     connect(engine->getPlayer(), &QMediaPlayer::durationChanged, this, updateTimeDisplay);
+    connect(engine->getPlayer(), &QMediaPlayer::stateChanged, controls, [this](QMediaPlayer::State state){
+        controls->setPlayButtonPlaying(state == QMediaPlayer::PlayingState);
+    });
+    controls->setPlayButtonPlaying(engine->getPlayer()->state() == QMediaPlayer::PlayingState);
 
     // Engine <-> Playlist connections
     connect(engine->getPlaylist(), &QMediaPlaylist::currentIndexChanged, playlistUI, [this](int index){
-        playlistUI->setCurrentRow(index);
+        QSignalBlocker blocker(playlistUI);
+        if (index >= 0) playlistUI->setCurrentRow(index);
+        else playlistUI->clearSelection();
     });
-    connect(playlistUI, &QListWidget::currentRowChanged, engine->getPlaylist(), &QMediaPlaylist::setCurrentIndex);
+    connect(playlistUI, &QListWidget::currentRowChanged, this, [this](int row){
+        if (row < 0) return;
+        engine->getPlaylist()->setCurrentIndex(row);
+        engine->getPlayer()->play();
+    });
 }
 
 void MainWindow::loadAndPlay(const QStringList &files) {
     stack->setCurrentWidget(playerPanel); // Switch to player panel
+    playlistUI->clear();
     for(const QString &f : files) playlistUI->addItem(QFileInfo(f).fileName());
     engine->loadFiles(files);
+    canvas->setFocus();
+}
+
+void MainWindow::appendFiles(const QStringList &files) {
+    if (files.isEmpty()) return;
+
+    QSet<QString> existingFiles;
+    QMediaPlaylist *playlist = engine->getPlaylist();
+    for (int i = 0; i < playlist->mediaCount(); ++i) {
+        existingFiles.insert(playlist->media(i).request().url().toLocalFile());
+    }
+
+    QStringList uniqueFiles;
+    for (const QString &file : files) {
+        if (existingFiles.contains(file)) continue;
+        existingFiles.insert(file);
+        uniqueFiles.append(file);
+    }
+
+    if (uniqueFiles.isEmpty()) return;
+
+    stack->setCurrentWidget(playerPanel);
+    for (const QString &f : uniqueFiles) playlistUI->addItem(QFileInfo(f).fileName());
+    engine->appendFiles(uniqueFiles);
+    canvas->setFocus();
+}
+
+void MainWindow::removeSelectedPlaylistItem() {
+    int row = playlistUI->currentRow();
+    if (row < 0) return;
+
+    QSignalBlocker blocker(playlistUI);
+    delete playlistUI->takeItem(row);
+
+    int nextIndex = engine->removeAt(row);
+    if (nextIndex >= 0 && nextIndex < playlistUI->count()) playlistUI->setCurrentRow(nextIndex);
+    else playlistUI->clearSelection();
+}
+
+void MainWindow::toggleFullscreen() {
+    if (isFullScreen()) showNormal();
+    else showFullScreen();
+
+    canvas->fitVideo();
+    canvas->setFocus();
+}
+
+void MainWindow::togglePlaylistVisibility() {
+    playlistVisible = !playlistVisible;
+    playlistPanel->setVisible(playlistVisible);
+    controls->setPlaylistVisible(playlistVisible);
+    canvas->fitVideo();
+    canvas->setFocus();
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Escape && isFullScreen()) {
+        toggleFullscreen();
+        return;
+    }
+
+    QWidget::keyPressEvent(event);
 }

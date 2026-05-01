@@ -1,5 +1,13 @@
 #include "MediaEngine.h"
 
+namespace {
+void addFilesToPlaylist(QMediaPlaylist *playlist, const QStringList &files) {
+    for (const QString &file : files) {
+        playlist->addMedia(QUrl::fromLocalFile(file));
+    }
+}
+}
+
 MediaEngine::MediaEngine(QObject *parent) : QObject(parent) {
     player = new QMediaPlayer(this);
     playlist = new QMediaPlaylist(this);
@@ -13,10 +21,50 @@ void MediaEngine::bindVideoOutput(QGraphicsVideoItem *item) {
 
 void MediaEngine::loadFiles(const QStringList &files) {
     playlist->clear();
-    for(const QString &file : files) {
-        playlist->addMedia(QUrl::fromLocalFile(file));
+    addFilesToPlaylist(playlist, files);
+
+    if (playlist->mediaCount() > 0) {
+        playlist->setCurrentIndex(0);
+        player->play();
+    } else {
+        player->stop();
     }
-    player->play();
+}
+
+void MediaEngine::appendFiles(const QStringList &files) {
+    int previousCount = playlist->mediaCount();
+    addFilesToPlaylist(playlist, files);
+
+    if (previousCount == 0 && playlist->mediaCount() > 0) {
+        playlist->setCurrentIndex(0);
+        player->play();
+    }
+}
+
+int MediaEngine::removeAt(int index) {
+    int mediaCount = playlist->mediaCount();
+    if (index < 0 || index >= mediaCount) return playlist->currentIndex();
+
+    int currentIndex = playlist->currentIndex();
+    bool removingCurrent = index == currentIndex;
+    bool wasPlaying = player->state() == QMediaPlayer::PlayingState;
+
+    playlist->removeMedia(index);
+
+    if (playlist->mediaCount() == 0) {
+        player->stop();
+        return -1;
+    }
+
+    if (removingCurrent) {
+        int nextIndex = index < playlist->mediaCount() ? index : playlist->mediaCount() - 1;
+        playlist->setCurrentIndex(nextIndex);
+        if (wasPlaying) player->play();
+        return nextIndex;
+    }
+
+    if (index < currentIndex) currentIndex--;
+    return currentIndex;
 }
 
 void MediaEngine::togglePlayback() {

@@ -7,8 +7,48 @@
 #include <QMouseEvent>
 #include <QStyleOptionSlider>
 #include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QMimeData>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QSet>
+
+namespace {
+const QSet<QString> kVideoExtensions = {
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm",
+    "m4v", "mpeg", "mpg", "ts", "m2ts", "3gp", "ogg"
+};
+
+bool isSupportedVideoFile(const QString &path) {
+    QFileInfo info(path);
+    return info.exists() && info.isFile() && kVideoExtensions.contains(info.suffix().toLower());
+}
+
+QStringList filterVideoFiles(const QStringList &paths) {
+    QStringList files;
+    for (const QString &path : paths) {
+        if (isSupportedVideoFile(path)) files.append(path);
+    }
+    return files;
+}
+
+QStringList localVideoFilesFromUrls(const QList<QUrl> &urls) {
+    QStringList paths;
+    for (const QUrl &url : urls) {
+        if (url.isLocalFile()) paths.append(url.toLocalFile());
+    }
+    return filterVideoFiles(paths);
+}
+
+QStringList promptForVideoFiles(QWidget *parent, const QString &title) {
+    return filterVideoFiles(QFileDialog::getOpenFileNames(
+        parent,
+        title,
+        "",
+        "Video Files (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.mpeg *.mpg *.ts *.m2ts *.3gp *.ogg);;All Files (*)"
+    ));
+}
+}
 
 // --- SeekSlider ---
 SeekSlider::SeekSlider(QWidget *parent) : QSlider(Qt::Horizontal, parent) {
@@ -34,12 +74,13 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
 
     QPushButton *btnPrev = new QPushButton("⏮");
     QPushButton *btnRewind = new QPushButton("⏪ -5s");
-    QPushButton *btnPlay = new QPushButton("⏯ Play/Pause");
+    playButton = new QPushButton("▶ Play");
     QPushButton *btnStop = new QPushButton("⏹ Stop");
     QPushButton *btnForward = new QPushButton("+5s ⏩");
     QPushButton *btnNext = new QPushButton("⏭");
+    playlistToggleButton = new QPushButton("Hide Playlist");
 
-    for(auto btn : {btnPrev, btnRewind, btnPlay, btnStop, btnForward, btnNext}) {
+    for(auto btn : {btnPrev, btnRewind, playButton, btnStop, btnForward, btnNext, playlistToggleButton}) {
         btn->setStyleSheet(Theme::Button);
     }
 
@@ -52,18 +93,71 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     volSlider->setStyleSheet(QString("QSlider::groove:horizontal { %1 } QSlider::sub-page:horizontal { %2 } QSlider::handle:horizontal { %3 }")
                   .arg(Theme::SliderGroove, Theme::VolColor, Theme::SliderHandle));
 
-    layout->addWidget(btnPrev); layout->addWidget(btnRewind); layout->addWidget(btnPlay);
+    layout->addWidget(btnPrev); layout->addWidget(btnRewind); layout->addWidget(playButton);
     layout->addWidget(btnStop); layout->addWidget(btnForward); layout->addWidget(btnNext);
+    layout->addWidget(playlistToggleButton);
     layout->addWidget(seekSlider, 1);
     layout->addWidget(timeLabel);
     layout->addWidget(volLabel); layout->addWidget(volSlider);
 
-    connect(btnPlay, &QPushButton::clicked, this, &ControlBar::playClicked);
+    connect(playButton, &QPushButton::clicked, this, &ControlBar::playClicked);
     connect(btnStop, &QPushButton::clicked, this, &ControlBar::stopClicked);
     connect(btnPrev, &QPushButton::clicked, this, &ControlBar::prevClicked);
     connect(btnNext, &QPushButton::clicked, this, &ControlBar::nextClicked);
     connect(btnRewind, &QPushButton::clicked, this, &ControlBar::rewindClicked);
     connect(btnForward, &QPushButton::clicked, this, &ControlBar::forwardClicked);
+    connect(playlistToggleButton, &QPushButton::clicked, this, &ControlBar::playlistToggleRequested);
+}
+
+void ControlBar::setPlayButtonPlaying(bool playing) {
+    playButton->setText(playing ? "❚❚ Pause" : "▶ Play");
+}
+
+void ControlBar::setPlaylistVisible(bool visible) {
+    playlistToggleButton->setText(visible ? "Hide Playlist" : "Show Playlist");
+}
+
+// --- PlaylistPanel ---
+PlaylistPanel::PlaylistPanel(QWidget *parent) : QWidget(parent) {
+    setAcceptDrops(true);
+    setStyleSheet(Theme::PanelBg);
+
+    QVBoxLayout *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(10);
+
+    QHBoxLayout *buttonLayout = new QHBoxLayout;
+    QPushButton *btnAdd = new QPushButton("Add");
+    QPushButton *btnRemove = new QPushButton("Remove");
+    btnAdd->setStyleSheet(Theme::Button);
+    btnRemove->setStyleSheet(Theme::Button);
+
+    playlistWidget = new QListWidget;
+    playlistWidget->setStyleSheet(Theme::PanelBg + Theme::PlaylistItem);
+
+    buttonLayout->addWidget(btnAdd);
+    buttonLayout->addWidget(btnRemove);
+
+    layout->addLayout(buttonLayout);
+    layout->addWidget(playlistWidget, 1);
+
+    connect(btnAdd, &QPushButton::clicked, this, [this](){
+        QStringList files = promptForVideoFiles(this, "Add Videos");
+        if (!files.isEmpty()) emit filesAppendRequested(files);
+    });
+    connect(btnRemove, &QPushButton::clicked, this, &PlaylistPanel::removeSelectedRequested);
+}
+
+void PlaylistPanel::dragEnterEvent(QDragEnterEvent *event) {
+    if (!localVideoFilesFromUrls(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
+}
+
+void PlaylistPanel::dropEvent(QDropEvent *event) {
+    QStringList files = localVideoFilesFromUrls(event->mimeData()->urls());
+    if (!files.isEmpty()) {
+        emit filesAppendRequested(files);
+        event->acceptProposedAction();
+    }
 }
 
 // --- StartPanel ---
@@ -80,13 +174,17 @@ StartPanel::StartPanel(QWidget *parent) : QWidget(parent) {
     layout->addWidget(icon); layout->addWidget(title); layout->addWidget(btnSelect, 0, Qt::AlignHCenter);
 
     connect(btnSelect, &QPushButton::clicked, this, [this](){
-        QStringList files = QFileDialog::getOpenFileNames(this, "Choose Video", "", "Video (*.*)");
+        QStringList files = promptForVideoFiles(this, "Choose Video");
         if(!files.isEmpty()) emit filesReady(files);
     });
 }
-void StartPanel::dragEnterEvent(QDragEnterEvent *event) { if (event->mimeData()->hasUrls()) event->acceptProposedAction(); }
+void StartPanel::dragEnterEvent(QDragEnterEvent *event) {
+    if (!localVideoFilesFromUrls(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
+}
 void StartPanel::dropEvent(QDropEvent *event) {
-    QStringList files;
-    for (const QUrl &url : event->mimeData()->urls()) if (url.isLocalFile()) files.append(url.toLocalFile());
-    if (!files.isEmpty()) emit filesReady(files);
+    QStringList files = localVideoFilesFromUrls(event->mimeData()->urls());
+    if (!files.isEmpty()) {
+        emit filesReady(files);
+        event->acceptProposedAction();
+    }
 }

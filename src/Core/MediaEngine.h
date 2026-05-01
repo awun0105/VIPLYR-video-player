@@ -12,6 +12,8 @@ public:
 
     void bindVideoOutput(QGraphicsVideoItem *item);
     void loadFiles(const QStringList &files);
+    void appendFiles(const QStringList &files);
+    int removeAt(int index);
 
     // Các lệnh điều khiển (API)
     void togglePlayback();
