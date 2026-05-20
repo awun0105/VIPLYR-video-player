@@ -19,6 +19,7 @@ VideoCanvas::VideoCanvas(QWidget *parent) : QGraphicsView(parent) {
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setBackgroundBrush(Qt::black);
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
 
     connect(videoItem, &QGraphicsVideoItem::nativeSizeChanged, this, [this](const QSizeF &size){
         videoItem->setSize(size);

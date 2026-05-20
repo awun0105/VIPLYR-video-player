@@ -19,6 +19,11 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     setWindowTitle("Viplyr - video player");
     resize(1100, 650);
     setStyleSheet(Theme::WindowBg);
+    setMouseTracking(true);
+
+    hideTimer = new QTimer(this);
+    hideTimer->setInterval(3000);
+    connect(hideTimer, &QTimer::timeout, this, &MainWindow::handleInactivity);
 
     watcher = new QFutureWatcher<QStringList>(this);
     connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
@@ -43,6 +48,9 @@ void MainWindow::setupPlayerPanel() {
     canvas = new VideoCanvas;
     controls = new ControlBar;
     playlistPanel = new PlaylistPanel;
+
+    canvas->installEventFilter(this);
+    controls->installEventFilter(this);
 
     engine->bindVideoOutput(canvas->getVideoItem());
 
@@ -149,8 +157,14 @@ void MainWindow::wireConnections() {
     connect(engine, &MediaEngine::durationChanged, this, updateTimeDisplay);
     connect(engine, &MediaEngine::stateChanged, controls, [this](QMediaPlayer::State state){
         controls->setPlayButtonPlaying(state == QMediaPlayer::PlayingState);
+        if (state == QMediaPlayer::PlayingState) hideTimer->start();
+        else {
+            hideTimer->stop();
+            resetInactivity();
+        }
     });
     controls->setPlayButtonPlaying(engine->state() == QMediaPlayer::PlayingState);
+    if (engine->state() == QMediaPlayer::PlayingState) hideTimer->start();
 
     // Engine <-> Playlist connections
     connect(engine, &MediaEngine::playlistIndexChanged, playlistUI, [this](int index){
@@ -237,4 +251,29 @@ void MainWindow::togglePlaylistVisibility() {
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
     QWidget::keyPressEvent(event);
+}
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
+    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+        resetInactivity();
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
+void MainWindow::handleInactivity() {
+    if (engine->state() != QMediaPlayer::PlayingState) return;
+    if (stack->currentWidget() != playerPanel) return;
+
+    controls->hide();
+    if (isFullScreen()) {
+        playlistPanel->hide();
+        setCursor(Qt::BlankCursor);
+    }
+}
+
+void MainWindow::resetInactivity() {
+    controls->show();
+    if (playlistVisible) playlistPanel->show();
+    setCursor(Qt::ArrowCursor);
+    if (engine->state() == QMediaPlayer::PlayingState) hideTimer->start();
 }
