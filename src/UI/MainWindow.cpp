@@ -34,7 +34,7 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
 
     thumbnailPopup = new QLabel(this);
     thumbnailPopup->setFixedSize(160, 110);
-    thumbnailPopup->setStyleSheet("background-color: black; border: 2px solid #555; border-radius: 4px; color: white;");
+    thumbnailPopup->setStyleSheet("background-color: rgba(0, 0, 0, 200); border: 1px solid #1E90FF; border-radius: 4px; color: white; font-weight: bold; font-family: monospace;");
     thumbnailPopup->setAlignment(Qt::AlignCenter);
     thumbnailPopup->hide();
 
