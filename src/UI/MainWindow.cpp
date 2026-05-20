@@ -32,27 +32,7 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     watcher = new QFutureWatcher<QStringList>(this);
     connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
 
-    // Initialize Thumbnail Popup
-    thumbnailPopup = new QWidget(this);
-    thumbnailPopup->setFixedSize(160, 120);
-    thumbnailPopup->setAttribute(Qt::WA_StyledBackground);
-    thumbnailPopup->setStyleSheet("background-color: #222; border: 1px solid #1E90FF; border-radius: 4px;");
-    thumbnailPopup->hide();
-
-    QVBoxLayout *thumbLayout = new QVBoxLayout(thumbnailPopup);
-    thumbLayout->setContentsMargins(2, 2, 2, 2); thumbLayout->setSpacing(2);
-
-    thumbnailImageLabel = new QLabel;
-    thumbnailImageLabel->setAlignment(Qt::AlignCenter);
-    thumbnailImageLabel->setStyleSheet("background-color: black; color: #555;");
-    thumbnailImageLabel->setText("Loading...");
-
-    thumbnailTimeLabel = new QLabel("00:00");
-    thumbnailTimeLabel->setAlignment(Qt::AlignCenter);
-    thumbnailTimeLabel->setStyleSheet("color: white; font-weight: bold; font-family: monospace; font-size: 11px;");
-
-    thumbLayout->addWidget(thumbnailImageLabel, 1);
-    thumbLayout->addWidget(thumbnailTimeLabel);
+    thumbPopup = new ThumbnailPopup(this);
 
     stack = new QStackedWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -148,35 +128,22 @@ void MainWindow::wireConnections() {
     connect(seek, &JumpSlider::hoverPosChanged, this, [this, seek](qint64 pos) {
         if (engine->playlistCount() == 0) return;
         
-        // Update time text
-        int seconds = (pos / 1000) % 60;
-        int minutes = (pos / 60000) % 60;
-        int hours = (pos / 3600000);
-        QString timeStr = hours > 0 
-            ? QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'))
-            : QString("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
-        thumbnailTimeLabel->setText(timeStr);
-
-        // Request thumbnail
+        thumbPopup->setPreview(pos, QPixmap());
         engine->getThumbnailExtractor()->requestThumbnail(pos);
         
-        // Position the popup above the slider
         QPoint localPos = seek->mapTo(this, QPoint(0, 0));
-        int x = localPos.x() + (seek->width() * pos / qMax(1LL, engine->duration())) - (thumbnailPopup->width() / 2);
-        int y = localPos.y() - thumbnailPopup->height() - 10;
+        int x = localPos.x() + (seek->width() * pos / qMax(1LL, engine->duration())) - (thumbPopup->width() / 2);
+        int y = localPos.y() - thumbPopup->height() - 10;
         
-        thumbnailPopup->move(qBound(0, x, width() - thumbnailPopup->width()), y);
-        thumbnailPopup->show();
-        thumbnailPopup->raise();
+        thumbPopup->move(qBound(0, x, width() - thumbPopup->width()), y);
+        thumbPopup->show();
+        thumbPopup->raise();
     });
     
-    connect(seek, &JumpSlider::hoverLeft, thumbnailPopup, &QWidget::hide);
+    connect(seek, &JumpSlider::hoverLeft, thumbPopup, &ThumbnailPopup::hide);
     
     connect(engine->getThumbnailExtractor(), &ThumbnailExtractor::thumbnailReady, this, [this](qint64 pos, const QPixmap &pix) {
-        if (thumbnailImageLabel) {
-            thumbnailImageLabel->setPixmap(pix);
-            thumbnailImageLabel->setText(""); // Clear "Loading..."
-        }
+        thumbPopup->setPreview(pos, pix);
     });
 
     // Playback Speed connection
@@ -196,21 +163,11 @@ void MainWindow::wireConnections() {
     // Engine -> Time display connections
     QLabel *timeLabel = controls->getTimeLabel();
 
-    // Create a lambda to format milliseconds to hh:mm:ss
-    auto formatTime = [](qint64 ms) -> QString {
-        int seconds = (ms / 1000) % 60;
-        int minutes = (ms / 60000) % 60;
-        int hours = (ms / 3600000);
-        if (hours > 0)
-            return QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
-        return QString("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
-    };
-
     // Function to update the displayed time text
-    auto updateTimeDisplay = [this, timeLabel, formatTime]() {
+    auto updateTimeDisplay = [this, timeLabel]() {
         qint64 pos = engine->position();
         qint64 dur = engine->duration();
-        timeLabel->setText(formatTime(pos) + " / " + formatTime(dur));
+        timeLabel->setText(Constants::formatTime(pos) + " / " + Constants::formatTime(dur));
     };
 
     // Event binding: update text whenever playback position or duration changes

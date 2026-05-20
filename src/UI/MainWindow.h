@@ -5,13 +5,13 @@
 #include <QFutureWatcher>
 #include <QStringList>
 #include <QTimer>
+#include "ThumbnailPopup.h"
 
 class MediaEngine;
 class VideoCanvas;
 class ControlBar;
 class StartPanel;
 class PlaylistPanel;
-class QLabel;
 
 class MainWindow : public QWidget {
     Q_OBJECT
@@ -43,10 +43,7 @@ private:
     QFutureWatcher<QStringList> *watcher;
     QTimer *hideTimer;
     
-    // Thumbnail Popup
-    QWidget *thumbnailPopup;
-    QLabel *thumbnailImageLabel;
-    QLabel *thumbnailTimeLabel;
+    ThumbnailPopup *thumbPopup;
 
     void setupPlayerPanel();
     void wireConnections();

@@ -14,9 +14,14 @@ public:
     explicit ThumbnailSurface(QObject *parent = nullptr);
     QList<QVideoFrame::PixelFormat> supportedPixelFormats(QAbstractVideoBuffer::HandleType handleType = QAbstractVideoBuffer::NoHandle) const override;
     bool present(const QVideoFrame &frame) override;
+    
+    void setCaptureRequested(bool req) { captureRequested = req; }
 
 signals:
     void frameCaptured(const QImage &image);
+
+private:
+    bool captureRequested;
 };
 
 // Manager to handle background extraction and caching

@@ -1,5 +1,7 @@
 #include "MediaEngine.h"
 #include <QFileInfo>
+#include <algorithm>
+#include "../Utils/Constants.h"
 
 namespace {
 void addFilesToPlaylist(QMediaPlaylist *playlist, const QStringList &files) {
@@ -129,13 +131,18 @@ void MediaEngine::updateSubtitle(qint64 position) {
         if (position >= sub.startTime && position <= sub.endTime) return;
     }
 
-    // Binary search or linear search for new subtitle
+    // Binary search for the first subtitle with startTime > position
+    auto it = std::upper_bound(currentSubtitles.begin(), currentSubtitles.end(), position, 
+        [](qint64 pos, const SubtitleItem &item) {
+            return pos < item.startTime;
+        });
+
     int newIndex = -1;
-    for (int i = 0; i < currentSubtitles.size(); ++i) {
-        const auto &sub = currentSubtitles[i];
-        if (position >= sub.startTime && position <= sub.endTime) {
-            newIndex = i;
-            break;
+    // The relevant subtitle could be the one right before 'it'
+    if (it != currentSubtitles.begin()) {
+        auto prev = std::prev(it);
+        if (position >= prev->startTime && position <= prev->endTime) {
+            newIndex = std::distance(currentSubtitles.begin(), prev);
         }
     }
 
