@@ -7,12 +7,12 @@
 
 class QPushButton;
 
-// --- Custom Slider ---
-class SeekSlider : public QSlider
+// --- Custom Slider with "Jump to Click" behavior ---
+class JumpSlider : public QSlider
 {
     Q_OBJECT
 public:
-    explicit SeekSlider(QWidget *parent = nullptr);
+    explicit JumpSlider(const QString &activeColor, QWidget *parent = nullptr);
 protected:
     void mousePressEvent(QMouseEvent *ev) override;
 };
@@ -23,8 +23,8 @@ class ControlBar : public QWidget
     Q_OBJECT
 public:
     explicit ControlBar(QWidget *parent = nullptr);
-    SeekSlider* getSeekSlider() const { return seekSlider; }
-    QSlider* getVolSlider() const { return volSlider; }
+    JumpSlider* getSeekSlider() const { return seekSlider; }
+    JumpSlider* getVolSlider() const { return volSlider; }
     QLabel* getTimeLabel() const { return timeLabel; }
     void setPlayButtonPlaying(bool playing);
     void setPlaylistVisible(bool visible);
@@ -43,8 +43,8 @@ private slots:
     void updateVolumeIcon(int value);
 
 private:
-    SeekSlider *seekSlider;
-    QSlider *volSlider;
+    JumpSlider *seekSlider;
+    JumpSlider *volSlider;
     QLabel *timeLabel;
     QPushButton *playButton;
     QPushButton *muteButton;

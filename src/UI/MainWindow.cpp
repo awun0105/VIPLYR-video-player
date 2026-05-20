@@ -74,7 +74,7 @@ void MainWindow::wireConnections() {
     });
 
     // Engine -> Seek slider connections
-    SeekSlider *seek = controls->getSeekSlider();
+    JumpSlider *seek = controls->getSeekSlider();
     connect(engine->getPlayer(), &QMediaPlayer::positionChanged, [seek](qint64 pos){
         if (!seek->isSliderDown()) seek->setValue(pos);
     });

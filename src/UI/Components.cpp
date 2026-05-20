@@ -50,12 +50,12 @@ QStringList promptForVideoFiles(QWidget *parent, const QString &title) {
 }
 }
 
-// --- SeekSlider ---
-SeekSlider::SeekSlider(QWidget *parent) : QSlider(Qt::Horizontal, parent) {
+// --- JumpSlider ---
+JumpSlider::JumpSlider(const QString &activeColor, QWidget *parent) : QSlider(Qt::Horizontal, parent) {
     setStyleSheet(QString("QSlider::groove:horizontal { %1 } QSlider::sub-page:horizontal { %2 } QSlider::handle:horizontal { %3 }")
-                  .arg(Theme::SliderGroove, Theme::SeekColor, Theme::SliderHandle));
+                  .arg(Theme::SliderGroove, activeColor, Theme::SliderHandle));
 }
-void SeekSlider::mousePressEvent(QMouseEvent *ev) {
+void JumpSlider::mousePressEvent(QMouseEvent *ev) {
     if (ev->button() == Qt::LeftButton) {
         QStyleOptionSlider opt; initStyleOption(&opt);
         int sr = style()->pixelMetric(QStyle::PM_SliderLength, &opt, this);
@@ -84,17 +84,15 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
         btn->setStyleSheet(Theme::Button);
     }
 
-    seekSlider = new SeekSlider;
+    seekSlider = new JumpSlider(Theme::SeekColor);
     timeLabel = new QLabel("00:00 / 00:00");
     timeLabel->setStyleSheet("color: #ccc; font-size: 13px; font-weight: bold; margin: 0 10px; font-family: monospace;");
     
     muteButton = new QPushButton("🔊");
     muteButton->setStyleSheet("background: transparent; border: none; font-size: 18px; color: white; padding: 0;");
     
-    volSlider = new QSlider(Qt::Horizontal);
+    volSlider = new JumpSlider(Theme::VolColor);
     volSlider->setRange(0, 100); volSlider->setValue(100); volSlider->setFixedWidth(100);
-    volSlider->setStyleSheet(QString("QSlider::groove:horizontal { %1 } QSlider::sub-page:horizontal { %2 } QSlider::handle:horizontal { %3 }")
-                  .arg(Theme::SliderGroove, Theme::VolColor, Theme::SliderHandle));
     lastVolume = 100;
 
     layout->addWidget(btnPrev); layout->addWidget(btnRewind); layout->addWidget(playButton);
