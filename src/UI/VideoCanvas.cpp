@@ -56,12 +56,7 @@ void VideoCanvas::wheelEvent(QWheelEvent *event) {
     else scale(1.0 / scaleFactor, 1.0 / scaleFactor);
 }
 
-void VideoCanvas::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_R) {
-        videoItem->setRotation(videoItem->rotation() + 90.0);
-        fitVideo();
-    }
-    else if (event->key() == Qt::Key_Space) emit spacePressed();
-    else if (event->key() == Qt::Key_Escape) emit exitFullscreenRequested();
-    else QGraphicsView::keyPressEvent(event);
+void VideoCanvas::rotate() {
+    videoItem->setRotation(videoItem->rotation() + 90.0);
+    fitVideo();
 }

@@ -96,6 +96,7 @@ void MediaEngine::seekRelative(qint64 msOffset) {
     player->setPosition(newPos);
 }
 void MediaEngine::setVolume(int volume) { player->setVolume(volume); }
+void MediaEngine::setPlaybackRate(qreal rate) { player->setPlaybackRate(rate); }
 void MediaEngine::setPlaylistIndex(int index) { playlist->setCurrentIndex(index); }
 
 void MediaEngine::handlePlayerError(QMediaPlayer::Error error) {

@@ -9,6 +9,9 @@ public:
     QGraphicsVideoItem* getVideoItem() const { return videoItem; }
     void fitVideo();
 
+public slots:
+    void rotate();
+
 signals:
     void spacePressed();
     void fullscreenToggleRequested();
@@ -19,7 +22,6 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     QGraphicsVideoItem *videoItem;

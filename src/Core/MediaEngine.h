@@ -22,6 +22,7 @@ public:
     int currentIndex() const { return playlist->currentIndex(); }
     QMediaPlayer::State state() const { return player->state(); }
     int volume() const { return player->volume(); }
+    qreal playbackRate() const { return player->playbackRate(); }
     QStringList mediaPaths() const;
 
 public slots:
@@ -34,6 +35,7 @@ public slots:
     void seekTo(qint64 position);
     void seekRelative(qint64 msOffset);
     void setVolume(int volume);
+    void setPlaybackRate(qreal rate);
     void setPlaylistIndex(int index);
 
 signals:

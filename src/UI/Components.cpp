@@ -74,6 +74,13 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     muteButton = new QPushButton("🔊");
     muteButton->setStyleSheet("background: transparent; border: none; font-size: 18px; color: white; padding: 0;");
     
+    speedCombo = new QComboBox;
+    speedCombo->addItems({"0.5x", "1.0x", "1.25x", "1.5x", "2.0x"});
+    speedCombo->setCurrentIndex(1); // 1.0x
+    speedCombo->setStyleSheet("QComboBox { background-color: #333; color: white; border: none; padding: 2px 5px; border-radius: 3px; font-weight: bold; } "
+                              "QComboBox::drop-down { border: none; } "
+                              "QComboBox QAbstractItemView { background-color: #333; color: white; selection-background-color: #1E90FF; }");
+
     volSlider = new JumpSlider(Theme::VolColor);
     volSlider->setRange(0, 100); volSlider->setValue(100); volSlider->setFixedWidth(100);
     lastVolume = 100;
@@ -83,6 +90,7 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     layout->addWidget(playlistToggleButton);
     layout->addWidget(seekSlider, 1);
     layout->addWidget(timeLabel);
+    layout->addWidget(speedCombo);
     layout->addWidget(muteButton); layout->addWidget(volSlider);
 
     connect(playButton, &QPushButton::clicked, this, &ControlBar::playClicked);

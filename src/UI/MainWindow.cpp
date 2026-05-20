@@ -10,6 +10,8 @@
 #include <QSignalBlocker>
 #include <QSet>
 #include <QMessageBox>
+#include <QShortcut>
+#include <QKeySequence>
 #include <QtConcurrent>
 #include "../Utils/Constants.h"
 
@@ -73,9 +75,32 @@ void MainWindow::wireConnections() {
     connect(controls, &ControlBar::rewindClicked, engine, [this](){ engine->seekRelative(-5000); });
     connect(controls, &ControlBar::forwardClicked, engine, [this](){ engine->seekRelative(5000); });
     connect(controls, &ControlBar::playlistToggleRequested, this, &MainWindow::togglePlaylistVisibility);
-    connect(canvas, &VideoCanvas::spacePressed, engine, &MediaEngine::togglePlayback);
     connect(canvas, &VideoCanvas::fullscreenToggleRequested, this, &MainWindow::toggleFullscreen);
     connect(canvas, &VideoCanvas::exitFullscreenRequested, this, [this]() {
+        if (isFullScreen()) toggleFullscreen();
+    });
+
+    // Global Hotkeys using QShortcut
+    new QShortcut(QKeySequence(Qt::Key_Space), this, engine, &MediaEngine::togglePlayback);
+    new QShortcut(QKeySequence(Qt::Key_F), this, this, &MainWindow::toggleFullscreen);
+    new QShortcut(QKeySequence(Qt::Key_M), this, controls, &ControlBar::toggleMute);
+    new QShortcut(QKeySequence(Qt::Key_R), this, canvas, &VideoCanvas::rotate);
+    new QShortcut(QKeySequence(Qt::Key_T), this, [this]() {
+        bool onTop = windowFlags() & Qt::WindowStaysOnTopHint;
+        setWindowFlags(onTop ? (windowFlags() & ~Qt::WindowStaysOnTopHint) : (windowFlags() | Qt::WindowStaysOnTopHint));
+        show();
+    });
+    new QShortcut(QKeySequence(Qt::Key_Left), this, [this]() { engine->seekRelative(-5000); });
+    new QShortcut(QKeySequence(Qt::Key_Right), this, [this]() { engine->seekRelative(5000); });
+    new QShortcut(QKeySequence(Qt::Key_Up), this, [this]() {
+        int newVol = qBound(0, engine->volume() + 5, 100);
+        controls->getVolSlider()->setValue(newVol);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Down), this, [this]() {
+        int newVol = qBound(0, engine->volume() - 5, 100);
+        controls->getVolSlider()->setValue(newVol);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Escape), this, [this]() {
         if (isFullScreen()) toggleFullscreen();
     });
 
@@ -87,6 +112,12 @@ void MainWindow::wireConnections() {
     connect(engine, &MediaEngine::durationChanged, seek, [seek](qint64 dur){ seek->setRange(0, dur); });
     connect(seek, &QSlider::sliderMoved, engine, &MediaEngine::seekTo);
     connect(controls->getVolSlider(), &QSlider::valueChanged, engine, &MediaEngine::setVolume);
+
+    // Playback Speed connection
+    connect(controls->getSpeedCombo(), &QComboBox::currentTextChanged, engine, [this](const QString &text) {
+        qreal rate = text.left(text.length() - 1).toDouble(); // Remove 'x'
+        engine->setPlaybackRate(rate);
+    });
 
     // Error handling
     connect(engine, &MediaEngine::errorOccurred, this, [this](const QString &err){
@@ -205,43 +236,5 @@ void MainWindow::togglePlaylistVisibility() {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
-    switch (event->key()) {
-        case Qt::Key_Space:
-            engine->togglePlayback();
-            break;
-        case Qt::Key_F:
-            toggleFullscreen();
-            break;
-        case Qt::Key_M:
-            controls->toggleMute();
-            break;
-        case Qt::Key_T: {
-            bool onTop = windowFlags() & Qt::WindowStaysOnTopHint;
-            if (onTop) setWindowFlags(windowFlags() & ~Qt::WindowStaysOnTopHint);
-            else setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
-            show(); // Cần gọi show() lại sau khi đổi flags
-            break;
-        }
-        case Qt::Key_Left:
-            engine->seekRelative(-5000);
-            break;
-        case Qt::Key_Right:
-            engine->seekRelative(5000);
-            break;
-        case Qt::Key_Up: {
-            int newVol = qBound(0, engine->volume() + 5, 100);
-            controls->getVolSlider()->setValue(newVol);
-            break;
-        }
-        case Qt::Key_Down: {
-            int newVol = qBound(0, engine->volume() - 5, 100);
-            controls->getVolSlider()->setValue(newVol);
-            break;
-        }
-        case Qt::Key_Escape:
-            if (isFullScreen()) toggleFullscreen();
-            break;
-        default:
-            QWidget::keyPressEvent(event);
-    }
+    QWidget::keyPressEvent(event);
 }

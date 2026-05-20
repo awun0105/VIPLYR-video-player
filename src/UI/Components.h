@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QLabel>
 #include <QLineEdit>
+#include <QComboBox>
 
 class QPushButton;
 
@@ -26,6 +27,7 @@ public:
     explicit ControlBar(QWidget *parent = nullptr);
     JumpSlider* getSeekSlider() const { return seekSlider; }
     JumpSlider* getVolSlider() const { return volSlider; }
+    QComboBox* getSpeedCombo() const { return speedCombo; }
     QLabel* getTimeLabel() const { return timeLabel; }
     void setPlayButtonPlaying(bool playing);
     void setPlaylistVisible(bool visible);
@@ -48,6 +50,7 @@ private slots:
 private:
     JumpSlider *seekSlider;
     JumpSlider *volSlider;
+    QComboBox *speedCombo;
     QLabel *timeLabel;
     QPushButton *playButton;
     QPushButton *muteButton;
