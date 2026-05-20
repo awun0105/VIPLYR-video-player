@@ -13,6 +13,7 @@
 #include <QShortcut>
 #include <QKeySequence>
 #include <QtConcurrent>
+#include <QApplication>
 #include "../Utils/Constants.h"
 
 MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true) {
@@ -24,6 +25,9 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     hideTimer = new QTimer(this);
     hideTimer->setInterval(3000);
     connect(hideTimer, &QTimer::timeout, this, &MainWindow::handleInactivity);
+
+    // Lắng nghe mọi sự kiện chuột/phím toàn cục trong ứng dụng
+    qApp->installEventFilter(this);
 
     watcher = new QFutureWatcher<QStringList>(this);
     connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
@@ -48,9 +52,6 @@ void MainWindow::setupPlayerPanel() {
     canvas = new VideoCanvas;
     controls = new ControlBar;
     playlistPanel = new PlaylistPanel;
-
-    canvas->installEventFilter(this);
-    controls->installEventFilter(this);
 
     engine->bindVideoOutput(canvas->getVideoItem());
 
@@ -254,7 +255,9 @@ void MainWindow::keyPressEvent(QKeyEvent *event) {
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
-    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress) {
+    if (event->type() == QEvent::MouseMove || 
+        event->type() == QEvent::MouseButtonPress || 
+        event->type() == QEvent::Wheel) {
         resetInactivity();
     }
     return QWidget::eventFilter(obj, event);
