@@ -42,7 +42,11 @@ private:
 
     QFutureWatcher<QStringList> *watcher;
     QTimer *hideTimer;
-    QLabel *thumbnailPopup;
+    
+    // Thumbnail Popup
+    QWidget *thumbnailPopup;
+    QLabel *thumbnailImageLabel;
+    QLabel *thumbnailTimeLabel;
 
     void setupPlayerPanel();
     void wireConnections();

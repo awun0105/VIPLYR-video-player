@@ -10,8 +10,10 @@ QList<QVideoFrame::PixelFormat> ThumbnailSurface::supportedPixelFormats(QAbstrac
         return QList<QVideoFrame::PixelFormat>()
             << QVideoFrame::Format_RGB32
             << QVideoFrame::Format_ARGB32
-            << QVideoFrame::Format_YV12
-            << QVideoFrame::Format_YUYV;
+            << QVideoFrame::Format_RGB24
+            << QVideoFrame::Format_BGRA32
+            << QVideoFrame::Format_BGR32
+            << QVideoFrame::Format_BGR24;
     }
     return QList<QVideoFrame::PixelFormat>();
 }
@@ -21,6 +23,7 @@ bool ThumbnailSurface::present(const QVideoFrame &frame) {
         QVideoFrame cloneFrame(frame);
         if (cloneFrame.map(QAbstractVideoBuffer::ReadOnly)) {
             QImage image(cloneFrame.bits(), cloneFrame.width(), cloneFrame.height(), 
+                         cloneFrame.bytesPerLine(),
                          QVideoFrame::imageFormatFromPixelFormat(cloneFrame.pixelFormat()));
             
             if (!image.isNull()) {
@@ -41,7 +44,7 @@ ThumbnailExtractor::ThumbnailExtractor(QObject *parent) : QObject(parent), lastR
     surface = new ThumbnailSurface(this);
     extractorPlayer->setVideoOutput(surface);
     
-    cache.setMaxCost(100);
+    cache.setMaxCost(150); // Increased cache
     
     connect(surface, &ThumbnailSurface::frameCaptured, this, &ThumbnailExtractor::onFrameCaptured);
 }
@@ -51,9 +54,9 @@ void ThumbnailExtractor::setSource(const QString &filePath) {
     currentSource = filePath;
     extractorPlayer->setMedia(QUrl::fromLocalFile(filePath));
     
-    // Prime the player: play briefly then pause to ensure the surface is active and file is loaded
+    // Quick prime
     extractorPlayer->play();
-    QTimer::singleShot(1000, this, [this]() {
+    QTimer::singleShot(200, this, [this]() {
         extractorPlayer->pause();
     });
     
@@ -61,7 +64,7 @@ void ThumbnailExtractor::setSource(const QString &filePath) {
 }
 
 void ThumbnailExtractor::requestThumbnail(qint64 position) {
-    // Round to nearest second for caching
+    // Round to nearest 1s
     qint64 roundedPos = (position / 1000) * 1000;
     
     if (cache.contains(roundedPos)) {
@@ -69,12 +72,13 @@ void ThumbnailExtractor::requestThumbnail(qint64 position) {
         return;
     }
     
-    // Ensure player is at least in Paused state to allow seeking
     if (extractorPlayer->state() == QMediaPlayer::StoppedState) {
         extractorPlayer->pause();
     }
 
     lastRequestedPos = roundedPos;
+    
+    // Some drivers need a slight "nudge" to refresh the surface on seek
     extractorPlayer->setPosition(roundedPos);
 }
 
@@ -82,11 +86,11 @@ void ThumbnailExtractor::onFrameCaptured(const QImage &image) {
     if (lastRequestedPos < 0) return;
     
     // Scale down for preview popup
-    QPixmap pixmap = QPixmap::fromImage(image.scaled(160, 90, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    QPixmap pixmap = QPixmap::fromImage(image.scaled(156, 88, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     
-    // Cache the result
+    if (pixmap.isNull()) return;
+
     cache.insert(lastRequestedPos, new QPixmap(pixmap));
-    
     emit thumbnailReady(lastRequestedPos, pixmap);
-    lastRequestedPos = -1; // Reset to wait for next request
+    lastRequestedPos = -1; 
 }

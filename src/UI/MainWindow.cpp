@@ -32,11 +32,27 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     watcher = new QFutureWatcher<QStringList>(this);
     connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
 
-    thumbnailPopup = new QLabel(this);
-    thumbnailPopup->setFixedSize(160, 110);
-    thumbnailPopup->setStyleSheet("background-color: rgba(0, 0, 0, 200); border: 1px solid #1E90FF; border-radius: 4px; color: white; font-weight: bold; font-family: monospace;");
-    thumbnailPopup->setAlignment(Qt::AlignCenter);
+    // Initialize Thumbnail Popup
+    thumbnailPopup = new QWidget(this);
+    thumbnailPopup->setFixedSize(160, 120);
+    thumbnailPopup->setAttribute(Qt::WA_StyledBackground);
+    thumbnailPopup->setStyleSheet("background-color: #222; border: 1px solid #1E90FF; border-radius: 4px;");
     thumbnailPopup->hide();
+
+    QVBoxLayout *thumbLayout = new QVBoxLayout(thumbnailPopup);
+    thumbLayout->setContentsMargins(2, 2, 2, 2); thumbLayout->setSpacing(2);
+
+    thumbnailImageLabel = new QLabel;
+    thumbnailImageLabel->setAlignment(Qt::AlignCenter);
+    thumbnailImageLabel->setStyleSheet("background-color: black; color: #555;");
+    thumbnailImageLabel->setText("Loading...");
+
+    thumbnailTimeLabel = new QLabel("00:00");
+    thumbnailTimeLabel->setAlignment(Qt::AlignCenter);
+    thumbnailTimeLabel->setStyleSheet("color: white; font-weight: bold; font-family: monospace; font-size: 11px;");
+
+    thumbLayout->addWidget(thumbnailImageLabel, 1);
+    thumbLayout->addWidget(thumbnailTimeLabel);
 
     stack = new QStackedWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -132,6 +148,15 @@ void MainWindow::wireConnections() {
     connect(seek, &JumpSlider::hoverPosChanged, this, [this, seek](qint64 pos) {
         if (engine->playlistCount() == 0) return;
         
+        // Update time text
+        int seconds = (pos / 1000) % 60;
+        int minutes = (pos / 60000) % 60;
+        int hours = (pos / 3600000);
+        QString timeStr = hours > 0 
+            ? QString("%1:%2:%3").arg(hours, 2, 10, QChar('0')).arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'))
+            : QString("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0'));
+        thumbnailTimeLabel->setText(timeStr);
+
         // Request thumbnail
         engine->getThumbnailExtractor()->requestThumbnail(pos);
         
@@ -145,10 +170,13 @@ void MainWindow::wireConnections() {
         thumbnailPopup->raise();
     });
     
-    connect(seek, &JumpSlider::hoverLeft, thumbnailPopup, &QLabel::hide);
+    connect(seek, &JumpSlider::hoverLeft, thumbnailPopup, &QWidget::hide);
     
     connect(engine->getThumbnailExtractor(), &ThumbnailExtractor::thumbnailReady, this, [this](qint64 pos, const QPixmap &pix) {
-        if (thumbnailPopup) thumbnailPopup->setPixmap(pix);
+        if (thumbnailImageLabel) {
+            thumbnailImageLabel->setPixmap(pix);
+            thumbnailImageLabel->setText(""); // Clear "Loading..."
+        }
     });
 
     // Playback Speed connection
