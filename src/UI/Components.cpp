@@ -75,8 +75,8 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     muteButton->setStyleSheet("background: transparent; border: none; font-size: 18px; color: white; padding: 0;");
     
     speedCombo = new QComboBox;
-    speedCombo->addItems({"0.5x", "1.0x", "1.25x", "1.5x", "2.0x"});
-    speedCombo->setCurrentIndex(1); // 1.0x
+    speedCombo->addItems({"2.0x", "1.5x", "1.25x", "1.0x", "0.5x"});
+    speedCombo->setCurrentIndex(3); // 1.0x (vị trí thứ 4 trong mảng 0-indexed)
     speedCombo->setStyleSheet("QComboBox { background-color: #333; color: white; border: none; padding: 2px 5px; border-radius: 3px; font-weight: bold; } "
                               "QComboBox::drop-down { border: none; } "
                               "QComboBox QAbstractItemView { background-color: #333; color: white; selection-background-color: #1E90FF; }");
