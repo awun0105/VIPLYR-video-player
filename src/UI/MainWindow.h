@@ -2,6 +2,8 @@
 #include <QWidget>
 #include <QStackedWidget>
 #include <QListWidget>
+#include <QFutureWatcher>
+#include <QStringList>
 
 class MediaEngine;
 class VideoCanvas;
@@ -18,6 +20,9 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
 
+private slots:
+    void onAsyncFilesProcessed();
+
 private:
     QStackedWidget *stack;
     StartPanel *startPanel;
@@ -29,6 +34,8 @@ private:
     PlaylistPanel *playlistPanel;
     QListWidget *playlistUI;
     bool playlistVisible;
+
+    QFutureWatcher<QStringList> *watcher;
 
     void setupPlayerPanel();
     void wireConnections();

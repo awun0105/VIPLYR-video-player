@@ -1,5 +1,6 @@
 #include "Components.h"
 #include "../Utils/Theme.h"
+#include "../Utils/Constants.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QPushButton>
@@ -14,38 +15,20 @@
 #include <QSet>
 
 namespace {
-const QSet<QString> kVideoExtensions = {
-    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm",
-    "m4v", "mpeg", "mpg", "ts", "m2ts", "3gp", "ogg"
-};
-
-bool isSupportedVideoFile(const QString &path) {
-    QFileInfo info(path);
-    return info.exists() && info.isFile() && kVideoExtensions.contains(info.suffix().toLower());
-}
-
-QStringList filterVideoFiles(const QStringList &paths) {
-    QStringList files;
-    for (const QString &path : paths) {
-        if (isSupportedVideoFile(path)) files.append(path);
-    }
-    return files;
-}
-
 QStringList localVideoFilesFromUrls(const QList<QUrl> &urls) {
     QStringList paths;
     for (const QUrl &url : urls) {
         if (url.isLocalFile()) paths.append(url.toLocalFile());
     }
-    return filterVideoFiles(paths);
+    return Constants::filterVideoFiles(paths);
 }
 
 QStringList promptForVideoFiles(QWidget *parent, const QString &title) {
-    return filterVideoFiles(QFileDialog::getOpenFileNames(
+    return Constants::filterVideoFiles(QFileDialog::getOpenFileNames(
         parent,
         title,
         "",
-        "Video Files (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.mpeg *.mpg *.ts *.m2ts *.3gp *.ogg);;All Files (*)"
+        Constants::kVideoFilter
     ));
 }
 }

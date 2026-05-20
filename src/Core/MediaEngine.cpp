@@ -13,6 +13,13 @@ MediaEngine::MediaEngine(QObject *parent) : QObject(parent) {
     playlist = new QMediaPlaylist(this);
     playlist->setPlaybackMode(QMediaPlaylist::Sequential);
     player->setPlaylist(playlist);
+
+    // Forwarding internal signals
+    connect(player, &QMediaPlayer::positionChanged, this, &MediaEngine::positionChanged);
+    connect(player, &QMediaPlayer::durationChanged, this, &MediaEngine::durationChanged);
+    connect(player, &QMediaPlayer::stateChanged, this, &MediaEngine::stateChanged);
+    connect(playlist, &QMediaPlaylist::currentIndexChanged, this, &MediaEngine::playlistIndexChanged);
+    connect(player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error), this, &MediaEngine::handlePlayerError);
 }
 
 void MediaEngine::bindVideoOutput(QGraphicsVideoItem *item) {
@@ -67,6 +74,14 @@ int MediaEngine::removeAt(int index) {
     return currentIndex;
 }
 
+QStringList MediaEngine::mediaPaths() const {
+    QStringList paths;
+    for (int i = 0; i < playlist->mediaCount(); ++i) {
+        paths.append(playlist->media(i).request().url().toLocalFile());
+    }
+    return paths;
+}
+
 void MediaEngine::togglePlayback() {
     if (player->state() == QMediaPlayer::PlayingState) player->pause();
     else player->play();
@@ -81,3 +96,9 @@ void MediaEngine::seekRelative(qint64 msOffset) {
     player->setPosition(newPos);
 }
 void MediaEngine::setVolume(int volume) { player->setVolume(volume); }
+void MediaEngine::setPlaylistIndex(int index) { playlist->setCurrentIndex(index); }
+
+void MediaEngine::handlePlayerError(QMediaPlayer::Error error) {
+    if (error == QMediaPlayer::NoError) return;
+    emit errorOccurred(player->errorString());
+}

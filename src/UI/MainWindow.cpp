@@ -9,11 +9,17 @@
 #include <QKeyEvent>
 #include <QSignalBlocker>
 #include <QSet>
+#include <QMessageBox>
+#include <QtConcurrent>
+#include "../Utils/Constants.h"
 
 MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true) {
     setWindowTitle("Viplyr - video player");
     resize(1100, 650);
     setStyleSheet(Theme::WindowBg);
+
+    watcher = new QFutureWatcher<QStringList>(this);
+    connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
 
     stack = new QStackedWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -75,12 +81,17 @@ void MainWindow::wireConnections() {
 
     // Engine -> Seek slider connections
     JumpSlider *seek = controls->getSeekSlider();
-    connect(engine->getPlayer(), &QMediaPlayer::positionChanged, [seek](qint64 pos){
+    connect(engine, &MediaEngine::positionChanged, [seek](qint64 pos){
         if (!seek->isSliderDown()) seek->setValue(pos);
     });
-    connect(engine->getPlayer(), &QMediaPlayer::durationChanged, seek, [seek](qint64 dur){ seek->setRange(0, dur); });
+    connect(engine, &MediaEngine::durationChanged, seek, [seek](qint64 dur){ seek->setRange(0, dur); });
     connect(seek, &QSlider::sliderMoved, engine, &MediaEngine::seekTo);
     connect(controls->getVolSlider(), &QSlider::valueChanged, engine, &MediaEngine::setVolume);
+
+    // Error handling
+    connect(engine, &MediaEngine::errorOccurred, this, [this](const QString &err){
+        QMessageBox::critical(this, "Playback Error", err);
+    });
 
     // Engine -> Time display connections
     QLabel *timeLabel = controls->getTimeLabel();
@@ -97,56 +108,66 @@ void MainWindow::wireConnections() {
 
     // Function to update the displayed time text
     auto updateTimeDisplay = [this, timeLabel, formatTime]() {
-        qint64 pos = engine->getPlayer()->position();
-        qint64 dur = engine->getPlayer()->duration();
+        qint64 pos = engine->position();
+        qint64 dur = engine->duration();
         timeLabel->setText(formatTime(pos) + " / " + formatTime(dur));
     };
 
     // Event binding: update text whenever playback position or duration changes
-    connect(engine->getPlayer(), &QMediaPlayer::positionChanged, this, updateTimeDisplay);
-    connect(engine->getPlayer(), &QMediaPlayer::durationChanged, this, updateTimeDisplay);
-    connect(engine->getPlayer(), &QMediaPlayer::stateChanged, controls, [this](QMediaPlayer::State state){
+    connect(engine, &MediaEngine::positionChanged, this, updateTimeDisplay);
+    connect(engine, &MediaEngine::durationChanged, this, updateTimeDisplay);
+    connect(engine, &MediaEngine::stateChanged, controls, [this](QMediaPlayer::State state){
         controls->setPlayButtonPlaying(state == QMediaPlayer::PlayingState);
     });
-    controls->setPlayButtonPlaying(engine->getPlayer()->state() == QMediaPlayer::PlayingState);
+    controls->setPlayButtonPlaying(engine->state() == QMediaPlayer::PlayingState);
 
     // Engine <-> Playlist connections
-    connect(engine->getPlaylist(), &QMediaPlaylist::currentIndexChanged, playlistUI, [this](int index){
+    connect(engine, &MediaEngine::playlistIndexChanged, playlistUI, [this](int index){
         QSignalBlocker blocker(playlistUI);
         if (index >= 0) playlistUI->setCurrentRow(index);
         else playlistUI->clearSelection();
     });
     connect(playlistUI, &QListWidget::currentRowChanged, this, [this](int row){
         if (row < 0) return;
-        engine->getPlaylist()->setCurrentIndex(row);
-        engine->getPlayer()->play();
+        engine->setPlaylistIndex(row);
+        engine->play();
     });
 }
 
 void MainWindow::loadAndPlay(const QStringList &files) {
+    QStringList filtered = Constants::filterVideoFiles(files);
+    if (filtered.isEmpty()) return;
+
     stack->setCurrentWidget(playerPanel); // Switch to player panel
     playlistUI->clear();
-    for(const QString &f : files) playlistUI->addItem(QFileInfo(f).fileName());
-    engine->loadFiles(files);
+    for(const QString &f : filtered) playlistUI->addItem(QFileInfo(f).fileName());
+    engine->loadFiles(filtered);
     canvas->setFocus();
 }
 
 void MainWindow::appendFiles(const QStringList &files) {
     if (files.isEmpty()) return;
+    
+    QStringList existingPaths = engine->mediaPaths();
 
-    QSet<QString> existingFiles;
-    QMediaPlaylist *playlist = engine->getPlaylist();
-    for (int i = 0; i < playlist->mediaCount(); ++i) {
-        existingFiles.insert(playlist->media(i).request().url().toLocalFile());
-    }
+    // Đẩy việc xử lý lọc file nặng và kiểm tra trùng lặp vào luồng phụ
+    auto future = QtConcurrent::run([files, existingPaths]() {
+        QStringList supported = Constants::filterVideoFiles(files);
+        QSet<QString> existingSet(existingPaths.begin(), existingPaths.end());
+        QStringList unique;
+        for (const QString &f : supported) {
+            if (!existingSet.contains(f)) {
+                unique.append(f);
+                existingSet.insert(f);
+            }
+        }
+        return unique;
+    });
+    watcher->setFuture(future);
+}
 
-    QStringList uniqueFiles;
-    for (const QString &file : files) {
-        if (existingFiles.contains(file)) continue;
-        existingFiles.insert(file);
-        uniqueFiles.append(file);
-    }
-
+void MainWindow::onAsyncFilesProcessed() {
+    QStringList uniqueFiles = watcher->result();
     if (uniqueFiles.isEmpty()) return;
 
     stack->setCurrentWidget(playerPanel);

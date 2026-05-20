@@ -15,7 +15,17 @@ public:
     void appendFiles(const QStringList &files);
     int removeAt(int index);
 
-    // Các lệnh điều khiển (API)
+    // Wrapper getters
+    qint64 position() const { return player->position(); }
+    qint64 duration() const { return player->duration(); }
+    int playlistCount() const { return playlist->mediaCount(); }
+    int currentIndex() const { return playlist->currentIndex(); }
+    QMediaPlayer::State state() const { return player->state(); }
+    QStringList mediaPaths() const;
+
+public slots:
+    void play() { player->play(); }
+    void pause() { player->pause(); }
     void togglePlayback();
     void stop();
     void next();
@@ -23,9 +33,17 @@ public:
     void seekTo(qint64 position);
     void seekRelative(qint64 msOffset);
     void setVolume(int volume);
+    void setPlaylistIndex(int index);
 
-    QMediaPlayer* getPlayer() const { return player; }
-    QMediaPlaylist* getPlaylist() const { return playlist; }
+signals:
+    void positionChanged(qint64 position);
+    void durationChanged(qint64 duration);
+    void stateChanged(QMediaPlayer::State state);
+    void playlistIndexChanged(int index);
+    void errorOccurred(const QString &errorString);
+
+private slots:
+    void handlePlayerError(QMediaPlayer::Error error);
 
 private:
     QMediaPlayer *player;
