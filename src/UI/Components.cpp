@@ -87,18 +87,22 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     seekSlider = new SeekSlider;
     timeLabel = new QLabel("00:00 / 00:00");
     timeLabel->setStyleSheet("color: #ccc; font-size: 13px; font-weight: bold; margin: 0 10px; font-family: monospace;");
-    QLabel *volLabel = new QLabel("🔊");
+    
+    muteButton = new QPushButton("🔊");
+    muteButton->setStyleSheet("background: transparent; border: none; font-size: 18px; color: white; padding: 0;");
+    
     volSlider = new QSlider(Qt::Horizontal);
     volSlider->setRange(0, 100); volSlider->setValue(100); volSlider->setFixedWidth(100);
     volSlider->setStyleSheet(QString("QSlider::groove:horizontal { %1 } QSlider::sub-page:horizontal { %2 } QSlider::handle:horizontal { %3 }")
                   .arg(Theme::SliderGroove, Theme::VolColor, Theme::SliderHandle));
+    lastVolume = 100;
 
     layout->addWidget(btnPrev); layout->addWidget(btnRewind); layout->addWidget(playButton);
     layout->addWidget(btnStop); layout->addWidget(btnForward); layout->addWidget(btnNext);
     layout->addWidget(playlistToggleButton);
     layout->addWidget(seekSlider, 1);
     layout->addWidget(timeLabel);
-    layout->addWidget(volLabel); layout->addWidget(volSlider);
+    layout->addWidget(muteButton); layout->addWidget(volSlider);
 
     connect(playButton, &QPushButton::clicked, this, &ControlBar::playClicked);
     connect(btnStop, &QPushButton::clicked, this, &ControlBar::stopClicked);
@@ -107,6 +111,27 @@ ControlBar::ControlBar(QWidget *parent) : QWidget(parent) {
     connect(btnRewind, &QPushButton::clicked, this, &ControlBar::rewindClicked);
     connect(btnForward, &QPushButton::clicked, this, &ControlBar::forwardClicked);
     connect(playlistToggleButton, &QPushButton::clicked, this, &ControlBar::playlistToggleRequested);
+    connect(muteButton, &QPushButton::clicked, this, &ControlBar::toggleMute);
+    connect(volSlider, &QSlider::valueChanged, this, &ControlBar::updateVolumeIcon);
+}
+
+void ControlBar::toggleMute() {
+    if (volSlider->value() > 0) {
+        lastVolume = volSlider->value();
+        volSlider->setValue(0);
+    } else {
+        volSlider->setValue(lastVolume > 0 ? lastVolume : 100);
+    }
+}
+
+void ControlBar::updateVolumeIcon(int value) {
+    if (value == 0) {
+        muteButton->setText("🔇");
+    } else if (value < 50) {
+        muteButton->setText("🔉");
+    } else {
+        muteButton->setText("🔊");
+    }
 }
 
 void ControlBar::setPlayButtonPlaying(bool playing) {

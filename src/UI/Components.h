@@ -38,12 +38,18 @@ signals:
     void forwardClicked();
     void playlistToggleRequested();
 
+private slots:
+    void toggleMute();
+    void updateVolumeIcon(int value);
+
 private:
     SeekSlider *seekSlider;
     QSlider *volSlider;
     QLabel *timeLabel;
     QPushButton *playButton;
+    QPushButton *muteButton;
     QPushButton *playlistToggleButton;
+    int lastVolume;
 };
 
 // --- Playlist Panel ---
