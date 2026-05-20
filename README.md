@@ -42,20 +42,38 @@ Viplyr/
 
 ## 2. Key Features
 
-- **Advanced Playback**:
-    - **Drag & Drop**: Seamlessly load files or entire directories.
-    - **Asynchronous Loading**: Process thousands of files without freezing the UI.
-    - **Playback Speed**: Adjust speed from **0.5x to 2.0x**.
-    - **Subtitles**: Automatic detection and real-time sync for **.srt** files (Binary Search optimized).
-- **Interactive UI**:
-    - **Thumbnail Preview**: Hover over the seek bar to see video frames (Cached & Throttled).
-    - **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
-    - **Playlist Search**: Real-time filtering for large video collections.
-    - **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
-- **Visuals & Transformations**:
-    - **Zoom & Pan**: Mouse wheel to zoom, left-click drag to pan.
-    - **Rotate**: 90-degree rotation support.
-    - **Always on Top**: Toggle "Stay on Top" mode to multitask while watching.
+### ✨ Advanced Playback
+- **Drag & Drop**: Seamlessly load files or entire directories.
+- **Asynchronous Loading**: Process thousands of files without freezing the UI.
+- **Playback Speed**: Adjust speed from **0.5x to 2.0x**.
+- **Subtitles**: Automatic detection and real-time sync for **.srt** files (Binary Search optimized).
+
+### 🖱️ Interactive UI
+- **Thumbnail Preview**: Hover over the seek bar to see video frames (Cached & Throttled).
+- **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
+- **Playlist Search**: Real-time filtering for large video collections.
+- **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
+
+### 🖼️ Visuals & Transformations
+- **Zoom & Pan**: Mouse wheel to zoom, left-click drag to pan.
+- **Rotate**: 90-degree rotation support.
+- **Always on Top**: Toggle "Stay on Top" mode to multitask while watching.
+
+### ⌨️ Controls (Hotkeys)
+
+| Key | Action |
+| --- | --- |
+| `Space` | Play / Pause |
+| `F` | Toggle Fullscreen |
+| `M` | Mute / Unmute |
+| `T` | Toggle Always on Top |
+| `R` | Rotate Video 90° |
+| `Left` / `Right` | Seek backward / forward 5s |
+| `Up` / `Down` | Increase / Decrease Volume |
+| `Esc` | Exit Fullscreen |
+| `Double Click` | Toggle Fullscreen |
+| `Mouse Wheel` | Zoom In / Out |
+| `Left Click Drag` | Pan Video (when zoomed) |
 
 ---
 
@@ -110,21 +128,3 @@ EOF
 
 update-desktop-database ~/.local/share/applications/
 ```
-
----
-
-## 5. Controls (Hotkeys)
-
-| Key | Action |
-| --- | --- |
-| `Space` | Play / Pause |
-| `F` | Toggle Fullscreen |
-| `M` | Mute / Unmute |
-| `T` | Toggle Always on Top |
-| `R` | Rotate Video 90° |
-| `Left` / `Right` | Seek backward / forward 5s |
-| `Up` / `Down` | Increase / Decrease Volume |
-| `Esc` | Exit Fullscreen |
-| `Double Click` | Toggle Fullscreen |
-| `Mouse Wheel` | Zoom In / Out |
-| `Left Click Drag` | Pan Video (when zoomed) |
