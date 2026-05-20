@@ -205,10 +205,43 @@ void MainWindow::togglePlaylistVisibility() {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_Escape && isFullScreen()) {
-        toggleFullscreen();
-        return;
+    switch (event->key()) {
+        case Qt::Key_Space:
+            engine->togglePlayback();
+            break;
+        case Qt::Key_F:
+            toggleFullscreen();
+            break;
+        case Qt::Key_M:
+            controls->toggleMute();
+            break;
+        case Qt::Key_T: {
+            bool onTop = windowFlags() & Qt::WindowStaysOnTopHint;
+            if (onTop) setWindowFlags(windowFlags() & ~Qt::WindowStaysOnTopHint);
+            else setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
+            show(); // Cần gọi show() lại sau khi đổi flags
+            break;
+        }
+        case Qt::Key_Left:
+            engine->seekRelative(-5000);
+            break;
+        case Qt::Key_Right:
+            engine->seekRelative(5000);
+            break;
+        case Qt::Key_Up: {
+            int newVol = qBound(0, engine->volume() + 5, 100);
+            controls->getVolSlider()->setValue(newVol);
+            break;
+        }
+        case Qt::Key_Down: {
+            int newVol = qBound(0, engine->volume() - 5, 100);
+            controls->getVolSlider()->setValue(newVol);
+            break;
+        }
+        case Qt::Key_Escape:
+            if (isFullScreen()) toggleFullscreen();
+            break;
+        default:
+            QWidget::keyPressEvent(event);
     }
-
-    QWidget::keyPressEvent(event);
 }

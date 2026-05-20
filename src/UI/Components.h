@@ -38,8 +38,10 @@ signals:
     void forwardClicked();
     void playlistToggleRequested();
 
-private slots:
+public slots:
     void toggleMute();
+
+private slots:
     void updateVolumeIcon(int value);
 
 private:

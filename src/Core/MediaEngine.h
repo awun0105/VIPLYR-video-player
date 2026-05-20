@@ -21,6 +21,7 @@ public:
     int playlistCount() const { return playlist->mediaCount(); }
     int currentIndex() const { return playlist->currentIndex(); }
     QMediaPlayer::State state() const { return player->state(); }
+    int volume() const { return player->volume(); }
     QStringList mediaPaths() const;
 
 public slots:
