@@ -1,20 +1,18 @@
-# Viplyr - A Simple Video Player for Linux
+# Viplyr - A Simple & Powerful Video Player for Linux
 
-**Viplyr** is an open-source video player built with **C++11** and **Qt5**.
-It is currently optimized for **Linux** (especially Ubuntu and Debian-based distributions).
-
-The goal of this project is to create a lightweight, easy-to-use video player with useful features such as drag-and-drop support, zoom & pan, and video rotation.
+**Viplyr** is an open-source video player built with **C++11** and **Qt5**. 
+It is a lightweight yet feature-rich application optimized for **Linux** (Ubuntu, Debian, etc.), featuring a clean MVC architecture and high-performance background processing.
 
 ---
 
 ## 1. Project Folder Structure
 
-The project is well-organized by strictly separating the **User Interface (UI)** from the **Core Logic**:
+The project maintains a strict separation between **UI**, **Core Logic**, and **Utilities**:
 
 ```text
 Viplyr/
 ├── Makefile                 # Convenience targets: build/run/setup/clean
-├── CMakeLists.txt           # CMake configuration file
+├── CMakeLists.txt           # CMake configuration with QtConcurrent support
 ├── setup.sh                 # Clean + configure (CMake) + build (Ninja)
 │
 ├── icon/
@@ -23,152 +21,110 @@ Viplyr/
 └── src/
     ├── main.cpp             # Program entry point
     │
-    ├── Utils/
-    │   └── Theme.h          # UI colors and styles (CSS)
+    ├── Utils/               # Utility & Background Logic
+    │   ├── Theme.h          # UI styles (CSS)
+    │   ├── Constants.h      # Global constants & time formatting
+    │   ├── SubtitleParser.h # SRT file parsing
+    │   └── ThumbnailExtractor.h # Async frame capture
     │
-    ├── Core/                # Core logic layer (no UI code)
+    ├── Core/                # Core logic layer (Encapsulated)
     │   ├── MediaEngine.h
-    │   └── MediaEngine.cpp  # Handles video playback and playlist
+    │   └── MediaEngine.cpp  # Video playback, playlist, & sync logic
     │
     └── UI/                  # User Interface layer
-        ├── Components.h/.cpp    # Reusable UI blocks (buttons, control bar, start screen)
-        ├── VideoCanvas.h/.cpp   # Video display area (supports zoom, pan, rotate)
-        └── MainWindow.h/.cpp    # Main window that coordinates everything
+        ├── Components.h/.cpp    # Custom Sliders, Control Bar, Panels
+        ├── VideoCanvas.h/.cpp   # Video display (Zoom, Pan, Rotate, Subtitles)
+        ├── ThumbnailPopup.h/.cpp # Preview popup component
+        └── MainWindow.h/.cpp    # Main window orchestrator
 ```
 
 ---
 
-## 2. Project Architecture (Simple Explanation)
+## 2. Key Features
 
-Viplyr follows the **MVC (Model-View-Controller)** pattern combined with the **Facade Pattern**.
-
-- **Core (Model)**: This part contains all the video playback logic. It uses Qt’s `QMediaPlayer` and `QMediaPlaylist`. It **does not know anything** about buttons, colors, or the user interface.
-- **UI (View)**: This part is responsible only for displaying things and handling user interactions (drag & drop, button clicks, zoom, etc.). It **does not know** how video decoding works.
-- **MainWindow (Controller)**: This acts as the “conductor”. It creates all the components, arranges the layout, and connects the UI and Core together using Qt’s **Signals & Slots** mechanism.
-
-All connections between UI and Core are centralized in one function called `wireConnections()` inside `MainWindow`. This keeps the code clean and avoids messy “spaghetti code”.
-
-### Benefits of this design:
-- Easy to maintain and modify.
-- You can change the interface without touching the video playback code (and vice versa).
-- The code stays organized even as the project grows.
-
----
-
-## 3. Key Features
-
-- **Drag & Drop**: Simply drag video files (or multiple files) and drop them into the player window to start playing.
-- **Playback Controls**: Play/Pause, Stop, Next/Prev, and skip ±5 seconds.
-- **Smart Seeking**: Click anywhere on the timeline to jump to that exact time (no need to drag the slider).
-- **Real-time Duration**: Shows current time and total duration in `00:00:00 / 01:23:45` format.
-- **Spatial Transformations**:
-  - **Zoom & Pan**: Scroll the mouse wheel to zoom in/out, hold left-click and drag to pan the video.
-  - **Rotate**: Press the **R** key to rotate the video 90 degrees.
-- **Fullscreen**: Double click on the video to toggle fullscreen. Press **Esc** to exit fullscreen.
-- **Playlist**:
-  - Drop multiple files to build a playlist and auto-play sequentially.
-  - Add more videos later via the playlist **Add** button or drag-and-drop into the playlist panel (duplicates are ignored).
-  - Remove the selected item with **Remove**.
-  - Hide/show the playlist from the control bar.
+- **Advanced Playback**:
+    - **Drag & Drop**: Seamlessly load files or entire directories.
+    - **Asynchronous Loading**: Process thousands of files without freezing the UI.
+    - **Playback Speed**: Adjust speed from **0.5x to 2.0x**.
+    - **Subtitles**: Automatic detection and real-time sync for **.srt** files (Binary Search optimized).
+- **Interactive UI**:
+    - **Thumbnail Preview**: Hover over the seek bar to see video frames (Cached & Throttled).
+    - **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
+    - **Playlist Search**: Real-time filtering for large video collections.
+    - **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
+- **Visuals & Transformations**:
+    - **Zoom & Pan**: Mouse wheel to zoom, left-click drag to pan.
+    - **Rotate**: 90-degree rotation support.
+    - **Always on Top**: Toggle "Stay on Top" mode to multitask while watching.
 
 ---
 
-## 4. Main Components and How They Work
+## 3. Project Architecture
 
-1. **MainWindow** (Controller)
-   The central coordinator. It initializes all objects, sets up the layout, and connects everything together.
+Viplyr follows a **Strict MVC (Model-View-Controller)** pattern:
+- **Core (Model)**: `MediaEngine` encapsulates `QMediaPlayer` and `QMediaPlaylist`. It handles all state and emits signals.
+- **UI (View)**: Dedicated widgets for canvas, controls, and popups.
+- **MainWindow (Controller)**: Centralizes all signal/slot connections and manages high-level application flow.
 
-2. **MediaEngine** (Core Logic)
-   A simple facade that hides the complexity of Qt Multimedia. It provides easy-to-use functions like `play()`, `pause()`, `seekTo()`, and `setVolume()`.
-
-3. **UI Components**:
-   - **StartPanel**: The welcome screen that supports drag-and-drop.
-   - **VideoCanvas**: The actual area where the video is displayed. It handles zoom, pan, and rotation using `QGraphicsView`.
-   - **ControlBar**: The bottom bar containing play/pause buttons, seek slider, volume slider, and time labels.
-
-**Basic Flow**:
-User drags a file → StartPanel receives it → MainWindow passes it to MediaEngine → MediaEngine plays the video → VideoCanvas shows the picture → ControlBar updates buttons and time.
+**Performance Note**: Heavy tasks (file filtering, thumbnail extraction) are offloaded to worker threads using `QtConcurrent`, ensuring a 60FPS responsive interface.
 
 ---
 
-## 5. How to Build and Run
+## 4. How to Build and Run
 
 ### Prerequisites
-
-You need a Linux system (Ubuntu or Debian recommended). Install the required packages:
-
 ```bash
 sudo apt update
 sudo apt install build-essential cmake ninja-build \
                  qtbase5-dev qtmultimedia5-dev libqt5multimediawidgets5
 ```
 
-### Build the Project
-
-1. Clone the repository:
+### Build & Install
+1. **Clone & Build**:
 ```bash
 git clone https://github.com/awun0105/VIPLYR-video-player.git
 cd VIPLYR-video-player
-```
-
-2. Configure and build:
-```bash
-chmod +x setup.sh
 ./setup.sh
 ```
 
-After a successful build, the executable will be located at `build/Viplyr`.
-
-For incremental rebuilds after editing code:
+2. **System Integration (Recommended)**:
 ```bash
-make build
-```
-
-### How to Launch Viplyr
-
-**Method 1: Run directly from terminal (for development)**
-```bash
-./build/Viplyr
-```
-
-Or use:
-```bash
-make run
-```
-
-**Method 2: Install as a regular desktop application** (recommended for daily use)
-
-```bash
-# Copy the executable
+# Install binary
 sudo cp build/Viplyr /usr/local/bin/Viplyr
 
-# Copy the icon
+# Install icon
 mkdir -p ~/.local/share/icons
 cp icon/viplyr_icon.png ~/.local/share/icons/viplyr_icon.png
 
-# Create desktop entry
-mkdir -p ~/.local/share/applications
+# Create desktop entry for "Open With..." support
 cat > ~/.local/share/applications/Viplyr.desktop << EOF
 [Desktop Entry]
 Name=Viplyr
-Exec=/usr/local/bin/Viplyr
-Icon=viplyr_icon
+Exec=/usr/local/bin/Viplyr %f
+Icon=/home/$USER/.local/share/icons/viplyr_icon.png
 Type=Application
 Categories=AudioVideo;Player;Video;
-MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;
+Terminal=false
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/x-flv;video/mpeg;video/ogg;video/3gpp;
 EOF
 
-# Update desktop database
 update-desktop-database ~/.local/share/applications/
 ```
 
-Now you can search for “Viplyr” in your application menu and use it like any other installed program.
-
 ---
 
-## 6. Controls
+## 5. Controls (Hotkeys)
 
-- `Space`: Play/Pause
-- `R`: Rotate 90 degrees
-- Double click video: Toggle fullscreen
-- `Esc`: Exit fullscreen
+| Key | Action |
+| --- | --- |
+| `Space` | Play / Pause |
+| `F` | Toggle Fullscreen |
+| `M` | Mute / Unmute |
+| `T` | Toggle Always on Top |
+| `R` | Rotate Video 90° |
+| `Left` / `Right` | Seek backward / forward 5s |
+| `Up` / `Down` | Increase / Decrease Volume |
+| `Esc` | Exit Fullscreen |
+| `Double Click` | Toggle Fullscreen |
+| `Mouse Wheel` | Zoom In / Out |
+| `Left Click Drag` | Pan Video (when zoomed) |
