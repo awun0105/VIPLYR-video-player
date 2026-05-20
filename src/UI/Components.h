@@ -4,6 +4,7 @@
 #include <QListWidget>
 #include <QStringList>
 #include <QLabel>
+#include <QLineEdit>
 
 class QPushButton;
 
@@ -71,6 +72,7 @@ protected:
 
 private:
     QListWidget *playlistWidget;
+    QLineEdit *searchEdit;
 };
 
 // --- Drag & Drop Start Panel ---

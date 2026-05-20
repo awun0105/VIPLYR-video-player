@@ -132,6 +132,10 @@ PlaylistPanel::PlaylistPanel(QWidget *parent) : QWidget(parent) {
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(10);
 
+    searchEdit = new QLineEdit;
+    searchEdit->setPlaceholderText("🔍 Search video...");
+    searchEdit->setStyleSheet("background-color: #222; color: #ccc; border: 1px solid #333; border-radius: 4px; padding: 5px;");
+
     QHBoxLayout *buttonLayout = new QHBoxLayout;
     QPushButton *btnAdd = new QPushButton("Add");
     QPushButton *btnRemove = new QPushButton("Remove");
@@ -144,6 +148,7 @@ PlaylistPanel::PlaylistPanel(QWidget *parent) : QWidget(parent) {
     buttonLayout->addWidget(btnAdd);
     buttonLayout->addWidget(btnRemove);
 
+    layout->addWidget(searchEdit);
     layout->addLayout(buttonLayout);
     layout->addWidget(playlistWidget, 1);
 
@@ -152,6 +157,14 @@ PlaylistPanel::PlaylistPanel(QWidget *parent) : QWidget(parent) {
         if (!files.isEmpty()) emit filesAppendRequested(files);
     });
     connect(btnRemove, &QPushButton::clicked, this, &PlaylistPanel::removeSelectedRequested);
+
+    connect(searchEdit, &QLineEdit::textChanged, this, [this](const QString &text){
+        for(int i = 0; i < playlistWidget->count(); ++i) {
+            QListWidgetItem *item = playlistWidget->item(i);
+            bool match = item->text().contains(text, Qt::CaseInsensitive);
+            item->setHidden(!match);
+        }
+    });
 }
 
 void PlaylistPanel::dragEnterEvent(QDragEnterEvent *event) {
