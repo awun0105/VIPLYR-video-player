@@ -37,6 +37,7 @@ QStringList promptForVideoFiles(QWidget *parent, const QString &title) {
 JumpSlider::JumpSlider(const QString &activeColor, QWidget *parent) : QSlider(Qt::Horizontal, parent) {
     setStyleSheet(QString("QSlider::groove:horizontal { %1 } QSlider::sub-page:horizontal { %2 } QSlider::handle:horizontal { %3 }")
                   .arg(Theme::SliderGroove, activeColor, Theme::SliderHandle));
+    setMouseTracking(true);
 }
 void JumpSlider::mousePressEvent(QMouseEvent *ev) {
     if (ev->button() == Qt::LeftButton) {
@@ -48,6 +49,18 @@ void JumpSlider::mousePressEvent(QMouseEvent *ev) {
         emit sliderMoved(newValue);
     }
     QSlider::mousePressEvent(ev);
+}
+void JumpSlider::mouseMoveEvent(QMouseEvent *ev) {
+    QStyleOptionSlider opt; initStyleOption(&opt);
+    int sr = style()->pixelMetric(QStyle::PM_SliderLength, &opt, this);
+    int w = width();
+    int hoverValue = QStyle::sliderValueFromPosition(minimum(), maximum(), ev->pos().x() - sr / 2, w - sr, opt.upsideDown);
+    emit hoverPosChanged(hoverValue);
+    QSlider::mouseMoveEvent(ev);
+}
+void JumpSlider::leaveEvent(QEvent *ev) {
+    emit hoverLeft();
+    QSlider::leaveEvent(ev);
 }
 
 // --- ControlBar ---

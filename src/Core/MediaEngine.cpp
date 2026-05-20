@@ -14,6 +14,8 @@ MediaEngine::MediaEngine(QObject *parent) : QObject(parent), lastSubtitleIndex(-
     playlist = new QMediaPlaylist(this);
     playlist->setPlaybackMode(QMediaPlaylist::Sequential);
     player->setPlaylist(playlist);
+    
+    thumbnailExtractor = new ThumbnailExtractor(this);
 
     // Forwarding internal signals
     connect(player, &QMediaPlayer::positionChanged, this, &MediaEngine::positionChanged);
@@ -152,6 +154,8 @@ void MediaEngine::loadSubtitlesForCurrent() {
     if (idx < 0) return;
 
     QString videoPath = playlist->media(idx).request().url().toLocalFile();
+    thumbnailExtractor->setSource(videoPath);
+    
     QFileInfo info(videoPath);
     QString srtPath = info.path() + "/" + info.completeBaseName() + ".srt";
 

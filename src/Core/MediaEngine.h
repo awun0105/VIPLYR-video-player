@@ -5,6 +5,7 @@
 #include <QGraphicsVideoItem>
 #include <QStringList>
 #include "../Utils/SubtitleParser.h"
+#include "../Utils/ThumbnailExtractor.h"
 
 class MediaEngine : public QObject {
     Q_OBJECT
@@ -25,6 +26,7 @@ public:
     int volume() const { return player->volume(); }
     qreal playbackRate() const { return player->playbackRate(); }
     QStringList mediaPaths() const;
+    ThumbnailExtractor* getThumbnailExtractor() const { return thumbnailExtractor; }
 
 public slots:
     void play() { player->play(); }
@@ -55,6 +57,7 @@ private slots:
 private:
     QMediaPlayer *player;
     QMediaPlaylist *playlist;
+    ThumbnailExtractor *thumbnailExtractor;
     QList<SubtitleItem> currentSubtitles;
     int lastSubtitleIndex;
 };

@@ -11,6 +11,7 @@ class VideoCanvas;
 class ControlBar;
 class StartPanel;
 class PlaylistPanel;
+class QLabel;
 
 class MainWindow : public QWidget {
     Q_OBJECT
@@ -41,6 +42,7 @@ private:
 
     QFutureWatcher<QStringList> *watcher;
     QTimer *hideTimer;
+    QLabel *thumbnailPopup;
 
     void setupPlayerPanel();
     void wireConnections();

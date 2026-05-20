@@ -15,8 +15,13 @@ class JumpSlider : public QSlider
     Q_OBJECT
 public:
     explicit JumpSlider(const QString &activeColor, QWidget *parent = nullptr);
+signals:
+    void hoverPosChanged(qint64 pos);
+    void hoverLeft();
 protected:
     void mousePressEvent(QMouseEvent *ev) override;
+    void mouseMoveEvent(QMouseEvent *ev) override;
+    void leaveEvent(QEvent *ev) override;
 };
 
 // --- Bottom Control Bar ---

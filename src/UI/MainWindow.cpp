@@ -32,6 +32,12 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     watcher = new QFutureWatcher<QStringList>(this);
     connect(watcher, &QFutureWatcher<QStringList>::finished, this, &MainWindow::onAsyncFilesProcessed);
 
+    thumbnailPopup = new QLabel(this);
+    thumbnailPopup->setFixedSize(160, 110);
+    thumbnailPopup->setStyleSheet("background-color: black; border: 2px solid #555; border-radius: 4px; color: white;");
+    thumbnailPopup->setAlignment(Qt::AlignCenter);
+    thumbnailPopup->hide();
+
     stack = new QStackedWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0,0,0,0);
@@ -121,6 +127,29 @@ void MainWindow::wireConnections() {
     connect(engine, &MediaEngine::durationChanged, seek, [seek](qint64 dur){ seek->setRange(0, dur); });
     connect(seek, &QSlider::sliderMoved, engine, &MediaEngine::seekTo);
     connect(controls->getVolSlider(), &QSlider::valueChanged, engine, &MediaEngine::setVolume);
+
+    // Thumbnail Preview connections
+    connect(seek, &JumpSlider::hoverPosChanged, this, [this, seek](qint64 pos) {
+        if (engine->playlistCount() == 0) return;
+        
+        // Request thumbnail
+        engine->getThumbnailExtractor()->requestThumbnail(pos);
+        
+        // Position the popup above the slider
+        QPoint localPos = seek->mapTo(this, QPoint(0, 0));
+        int x = localPos.x() + (seek->width() * pos / qMax(1LL, engine->duration())) - (thumbnailPopup->width() / 2);
+        int y = localPos.y() - thumbnailPopup->height() - 10;
+        
+        thumbnailPopup->move(qBound(0, x, width() - thumbnailPopup->width()), y);
+        thumbnailPopup->show();
+        thumbnailPopup->raise();
+    });
+    
+    connect(seek, &JumpSlider::hoverLeft, thumbnailPopup, &QLabel::hide);
+    
+    connect(engine->getThumbnailExtractor(), &ThumbnailExtractor::thumbnailReady, this, [this](qint64 pos, const QPixmap &pix) {
+        if (thumbnailPopup) thumbnailPopup->setPixmap(pix);
+    });
 
     // Playback Speed connection
     connect(controls->getSpeedCombo(), &QComboBox::currentTextChanged, engine, [this](const QString &text) {
