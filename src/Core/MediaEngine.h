@@ -4,6 +4,7 @@
 #include <QMediaPlaylist>
 #include <QGraphicsVideoItem>
 #include <QStringList>
+#include "../Utils/SubtitleParser.h"
 
 class MediaEngine : public QObject {
     Q_OBJECT
@@ -44,11 +45,16 @@ signals:
     void stateChanged(QMediaPlayer::State state);
     void playlistIndexChanged(int index);
     void errorOccurred(const QString &errorString);
+    void subtitleTextChanged(const QString &text);
 
 private slots:
     void handlePlayerError(QMediaPlayer::Error error);
+    void updateSubtitle(qint64 position);
+    void loadSubtitlesForCurrent();
 
 private:
     QMediaPlayer *player;
     QMediaPlaylist *playlist;
+    QList<SubtitleItem> currentSubtitles;
+    int lastSubtitleIndex;
 };

@@ -21,6 +21,13 @@ VideoCanvas::VideoCanvas(QWidget *parent) : QGraphicsView(parent) {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
 
+    subtitleLabel = new QLabel(this);
+    subtitleLabel->setAlignment(Qt::AlignCenter);
+    subtitleLabel->setStyleSheet("color: white; font-size: 22px; font-weight: bold; "
+                                 "background-color: rgba(0, 0, 0, 150); border-radius: 5px; padding: 5px 15px;");
+    subtitleLabel->setVisible(false);
+    subtitleLabel->setAttribute(Qt::WA_TransparentForMouseEvents); // Don't block clicks
+
     connect(videoItem, &QGraphicsVideoItem::nativeSizeChanged, this, [this](const QSizeF &size){
         videoItem->setSize(size);
         fitVideo();
@@ -33,6 +40,21 @@ void VideoCanvas::fitVideo() {
     setSceneRect(videoItem->sceneBoundingRect());
     resetTransform();
     fitInView(videoItem, Qt::KeepAspectRatio);
+}
+
+void VideoCanvas::setSubtitleText(const QString &text) {
+    if (text.isEmpty()) {
+        subtitleLabel->hide();
+    } else {
+        subtitleLabel->setText(text);
+        subtitleLabel->adjustSize();
+
+        // Center at bottom
+        int x = (width() - subtitleLabel->width()) / 2;
+        int y = height() - subtitleLabel->height() - 40; // 40px from bottom
+        subtitleLabel->move(x, y);
+        subtitleLabel->show();
+    }
 }
 
 void VideoCanvas::mousePressEvent(QMouseEvent *event) {
@@ -48,6 +70,13 @@ void VideoCanvas::mouseDoubleClickEvent(QMouseEvent *event) {
 void VideoCanvas::resizeEvent(QResizeEvent *event) {
     QGraphicsView::resizeEvent(event);
     fitVideo();
+
+    // Reposition subtitle on resize if visible
+    if (subtitleLabel->isVisible()) {
+        int x = (width() - subtitleLabel->width()) / 2;
+        int y = height() - subtitleLabel->height() - 40;
+        subtitleLabel->move(x, y);
+    }
 }
 
 void VideoCanvas::wheelEvent(QWheelEvent *event) {

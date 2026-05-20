@@ -133,6 +133,9 @@ void MainWindow::wireConnections() {
         QMessageBox::critical(this, "Playback Error", err);
     });
 
+    // Subtitle connection
+    connect(engine, &MediaEngine::subtitleTextChanged, canvas, &VideoCanvas::setSubtitleText);
+
     // Engine -> Time display connections
     QLabel *timeLabel = controls->getTimeLabel();
 

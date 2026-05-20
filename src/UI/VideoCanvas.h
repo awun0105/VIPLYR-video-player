@@ -1,6 +1,7 @@
 #pragma once
 #include <QGraphicsView>
 #include <QGraphicsVideoItem>
+#include <QLabel>
 
 class VideoCanvas : public QGraphicsView {
     Q_OBJECT
@@ -11,6 +12,7 @@ public:
 
 public slots:
     void rotate();
+    void setSubtitleText(const QString &text);
 
 signals:
     void spacePressed();
@@ -25,4 +27,5 @@ protected:
 
 private:
     QGraphicsVideoItem *videoItem;
+    QLabel *subtitleLabel;
 };

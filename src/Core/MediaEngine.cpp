@@ -1,4 +1,5 @@
 #include "MediaEngine.h"
+#include <QFileInfo>
 
 namespace {
 void addFilesToPlaylist(QMediaPlaylist *playlist, const QStringList &files) {
@@ -8,7 +9,7 @@ void addFilesToPlaylist(QMediaPlaylist *playlist, const QStringList &files) {
 }
 }
 
-MediaEngine::MediaEngine(QObject *parent) : QObject(parent) {
+MediaEngine::MediaEngine(QObject *parent) : QObject(parent), lastSubtitleIndex(-1) {
     player = new QMediaPlayer(this);
     playlist = new QMediaPlaylist(this);
     playlist->setPlaybackMode(QMediaPlaylist::Sequential);
@@ -20,6 +21,10 @@ MediaEngine::MediaEngine(QObject *parent) : QObject(parent) {
     connect(player, &QMediaPlayer::stateChanged, this, &MediaEngine::stateChanged);
     connect(playlist, &QMediaPlaylist::currentIndexChanged, this, &MediaEngine::playlistIndexChanged);
     connect(player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error), this, &MediaEngine::handlePlayerError);
+
+    // Subtitle synchronization
+    connect(player, &QMediaPlayer::positionChanged, this, &MediaEngine::updateSubtitle);
+    connect(playlist, &QMediaPlaylist::currentIndexChanged, this, &MediaEngine::loadSubtitlesForCurrent);
 }
 
 void MediaEngine::bindVideoOutput(QGraphicsVideoItem *item) {
@@ -32,6 +37,7 @@ void MediaEngine::loadFiles(const QStringList &files) {
 
     if (playlist->mediaCount() > 0) {
         playlist->setCurrentIndex(0);
+        loadSubtitlesForCurrent(); // Manual trigger for first file
         player->play();
     } else {
         player->stop();
@@ -44,6 +50,7 @@ void MediaEngine::appendFiles(const QStringList &files) {
 
     if (previousCount == 0 && playlist->mediaCount() > 0) {
         playlist->setCurrentIndex(0);
+        loadSubtitlesForCurrent();
         player->play();
     }
 }
@@ -60,12 +67,15 @@ int MediaEngine::removeAt(int index) {
 
     if (playlist->mediaCount() == 0) {
         player->stop();
+        currentSubtitles.clear();
+        emit subtitleTextChanged("");
         return -1;
     }
 
     if (removingCurrent) {
         int nextIndex = index < playlist->mediaCount() ? index : playlist->mediaCount() - 1;
         playlist->setCurrentIndex(nextIndex);
+        loadSubtitlesForCurrent();
         if (wasPlaying) player->play();
         return nextIndex;
     }
@@ -90,10 +100,14 @@ void MediaEngine::togglePlayback() {
 void MediaEngine::stop() { player->stop(); }
 void MediaEngine::next() { playlist->next(); }
 void MediaEngine::previous() { playlist->previous(); }
-void MediaEngine::seekTo(qint64 position) { player->setPosition(position); }
+void MediaEngine::seekTo(qint64 position) { 
+    player->setPosition(position); 
+    lastSubtitleIndex = -1; // Force re-scan on seek
+}
 void MediaEngine::seekRelative(qint64 msOffset) {
     qint64 newPos = qBound(0LL, player->position() + msOffset, player->duration());
     player->setPosition(newPos);
+    lastSubtitleIndex = -1;
 }
 void MediaEngine::setVolume(int volume) { player->setVolume(volume); }
 void MediaEngine::setPlaybackRate(qreal rate) { player->setPlaybackRate(rate); }
@@ -102,4 +116,46 @@ void MediaEngine::setPlaylistIndex(int index) { playlist->setCurrentIndex(index)
 void MediaEngine::handlePlayerError(QMediaPlayer::Error error) {
     if (error == QMediaPlayer::NoError) return;
     emit errorOccurred(player->errorString());
+}
+
+void MediaEngine::updateSubtitle(qint64 position) {
+    if (currentSubtitles.isEmpty()) return;
+
+    // Fast check: is current subtitle still valid?
+    if (lastSubtitleIndex >= 0 && lastSubtitleIndex < currentSubtitles.size()) {
+        const auto &sub = currentSubtitles[lastSubtitleIndex];
+        if (position >= sub.startTime && position <= sub.endTime) return;
+    }
+
+    // Binary search or linear search for new subtitle
+    int newIndex = -1;
+    for (int i = 0; i < currentSubtitles.size(); ++i) {
+        const auto &sub = currentSubtitles[i];
+        if (position >= sub.startTime && position <= sub.endTime) {
+            newIndex = i;
+            break;
+        }
+    }
+
+    if (newIndex != lastSubtitleIndex) {
+        lastSubtitleIndex = newIndex;
+        emit subtitleTextChanged(newIndex >= 0 ? currentSubtitles[newIndex].text : "");
+    }
+}
+
+void MediaEngine::loadSubtitlesForCurrent() {
+    currentSubtitles.clear();
+    lastSubtitleIndex = -1;
+    emit subtitleTextChanged("");
+
+    int idx = playlist->currentIndex();
+    if (idx < 0) return;
+
+    QString videoPath = playlist->media(idx).request().url().toLocalFile();
+    QFileInfo info(videoPath);
+    QString srtPath = info.path() + "/" + info.completeBaseName() + ".srt";
+
+    if (QFile::exists(srtPath)) {
+        currentSubtitles = SubtitleParser::parse(srtPath);
+    }
 }
