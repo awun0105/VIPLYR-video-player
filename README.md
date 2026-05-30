@@ -12,7 +12,7 @@ The project maintains a strict separation between **UI**, **Core Logic**, and **
 ```text
 Viplyr/
 ├── Makefile                 # Convenience targets: build/run/setup/clean
-├── CMakeLists.txt           # CMake configuration with QtConcurrent support
+├── CMakeLists.txt           # CMake configuration with QtConcurrent/QtDBus support
 ├── setup.sh                 # Clean + configure (CMake) + build (Ninja)
 │
 ├── icon/
@@ -53,6 +53,7 @@ Viplyr/
 - **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
 - **Playlist Search**: Real-time filtering for large video collections.
 - **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
+- **Playback Idle Inhibit**: Keeps the desktop session awake while video is playing.
 
 ### 🖼️ Visuals & Transformations
 - **Zoom & Pan**: Mouse wheel to zoom, left-click drag to pan.
@@ -96,6 +97,8 @@ sudo apt update
 sudo apt install build-essential cmake ninja-build \
                  qtbase5-dev qtmultimedia5-dev libqt5multimediawidgets5
 ```
+
+`qtbase5-dev` provides the QtDBus module used to inhibit desktop idle sleep during playback.
 
 ### Build & Install
 1. **Clone & Build**:

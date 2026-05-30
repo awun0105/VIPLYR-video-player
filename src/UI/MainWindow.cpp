@@ -14,9 +14,13 @@
 #include <QKeySequence>
 #include <QtConcurrent>
 #include <QApplication>
+#include <QDBusConnection>
+#include <QDBusInterface>
+#include <QDBusReply>
 #include "../Utils/Constants.h"
 
-MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true) {
+MainWindow::MainWindow(QWidget *parent)
+    : QWidget(parent), playlistVisible(true), idleInhibitionActive(false), idleInhibitionCookie(0) {
     setWindowTitle("Viplyr - video player");
     resize(1100, 650);
     setStyleSheet(Theme::WindowBg);
@@ -47,6 +51,10 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent), playlistVisible(true)
     stack->addWidget(playerPanel);
 
     wireConnections();
+}
+
+MainWindow::~MainWindow() {
+    releaseIdleInhibition();
 }
 
 void MainWindow::setupPlayerPanel() {
@@ -175,6 +183,7 @@ void MainWindow::wireConnections() {
     connect(engine, &MediaEngine::durationChanged, this, updateTimeDisplay);
     connect(engine, &MediaEngine::stateChanged, controls, [this](QMediaPlayer::State state){
         controls->setPlayButtonPlaying(state == QMediaPlayer::PlayingState);
+        updateIdleInhibition(state);
         if (state == QMediaPlayer::PlayingState) hideTimer->start();
         else {
             hideTimer->stop();
@@ -296,4 +305,86 @@ void MainWindow::resetInactivity() {
     if (playlistVisible) playlistPanel->show();
     setCursor(Qt::ArrowCursor);
     if (engine->state() == QMediaPlayer::PlayingState) hideTimer->start();
+}
+
+void MainWindow::updateIdleInhibition(QMediaPlayer::State state) {
+    if (state == QMediaPlayer::PlayingState) inhibitIdle();
+    else releaseIdleInhibition();
+}
+
+void MainWindow::inhibitIdle() {
+    if (idleInhibitionActive) return;
+
+    QDBusInterface screenSaver(
+        "org.freedesktop.ScreenSaver",
+        "/ScreenSaver",
+        "org.freedesktop.ScreenSaver",
+        QDBusConnection::sessionBus()
+    );
+
+    if (screenSaver.isValid()) {
+        QDBusReply<uint> reply = screenSaver.call(
+            "Inhibit",
+            QStringLiteral("Viplyr"),
+            QStringLiteral("Video playback is active")
+        );
+
+        if (reply.isValid()) {
+            idleInhibitionCookie = reply.value();
+            idleInhibitionService = QStringLiteral("org.freedesktop.ScreenSaver");
+            idleInhibitionPath = QStringLiteral("/ScreenSaver");
+            idleInhibitionInterface = QStringLiteral("org.freedesktop.ScreenSaver");
+            idleInhibitionReleaseMethod = QStringLiteral("UnInhibit");
+            idleInhibitionActive = true;
+            return;
+        }
+    }
+
+    QDBusInterface gnomeSession(
+        "org.gnome.SessionManager",
+        "/org/gnome/SessionManager",
+        "org.gnome.SessionManager",
+        QDBusConnection::sessionBus()
+    );
+
+    if (!gnomeSession.isValid()) return;
+
+    QDBusReply<uint> gnomeReply = gnomeSession.call(
+        "Inhibit",
+        QStringLiteral("Viplyr"),
+        uint(0),
+        QStringLiteral("Video playback is active"),
+        uint(8)
+    );
+
+    if (gnomeReply.isValid()) {
+        idleInhibitionCookie = gnomeReply.value();
+        idleInhibitionService = QStringLiteral("org.gnome.SessionManager");
+        idleInhibitionPath = QStringLiteral("/org/gnome/SessionManager");
+        idleInhibitionInterface = QStringLiteral("org.gnome.SessionManager");
+        idleInhibitionReleaseMethod = QStringLiteral("Uninhibit");
+        idleInhibitionActive = true;
+    }
+}
+
+void MainWindow::releaseIdleInhibition() {
+    if (!idleInhibitionActive) return;
+
+    QDBusInterface screenSaver(
+        idleInhibitionService,
+        idleInhibitionPath,
+        idleInhibitionInterface,
+        QDBusConnection::sessionBus()
+    );
+
+    if (screenSaver.isValid()) {
+        screenSaver.call(idleInhibitionReleaseMethod, idleInhibitionCookie);
+    }
+
+    idleInhibitionCookie = 0;
+    idleInhibitionActive = false;
+    idleInhibitionService.clear();
+    idleInhibitionPath.clear();
+    idleInhibitionInterface.clear();
+    idleInhibitionReleaseMethod.clear();
 }

@@ -5,6 +5,7 @@
 #include <QFutureWatcher>
 #include <QStringList>
 #include <QTimer>
+#include <QMediaPlayer>
 #include "ThumbnailPopup.h"
 
 class MediaEngine;
@@ -17,6 +18,7 @@ class MainWindow : public QWidget {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
     void loadAndPlay(const QStringList &files);
 
 protected:
@@ -39,6 +41,12 @@ private:
     PlaylistPanel *playlistPanel;
     QListWidget *playlistUI;
     bool playlistVisible;
+    bool idleInhibitionActive;
+    uint idleInhibitionCookie;
+    QString idleInhibitionService;
+    QString idleInhibitionPath;
+    QString idleInhibitionInterface;
+    QString idleInhibitionReleaseMethod;
 
     QFutureWatcher<QStringList> *watcher;
     QTimer *hideTimer;
@@ -51,4 +59,7 @@ private:
     void removeSelectedPlaylistItem();
     void toggleFullscreen();
     void togglePlaylistVisibility();
+    void updateIdleInhibition(QMediaPlayer::State state);
+    void inhibitIdle();
+    void releaseIdleInhibition();
 };

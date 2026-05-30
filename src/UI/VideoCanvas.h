@@ -28,4 +28,5 @@ protected:
 private:
     QGraphicsVideoItem *videoItem;
     QLabel *subtitleLabel;
+    bool manualTransformActive;
 };

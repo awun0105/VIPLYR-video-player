@@ -5,7 +5,7 @@
 #include <QKeyEvent>
 #include <QResizeEvent>
 
-VideoCanvas::VideoCanvas(QWidget *parent) : QGraphicsView(parent) {
+VideoCanvas::VideoCanvas(QWidget *parent) : QGraphicsView(parent), manualTransformActive(false) {
     QGraphicsScene *scene = new QGraphicsScene(this);
     setScene(scene);
 
@@ -40,6 +40,7 @@ void VideoCanvas::fitVideo() {
     setSceneRect(videoItem->sceneBoundingRect());
     resetTransform();
     fitInView(videoItem, Qt::KeepAspectRatio);
+    manualTransformActive = false;
 }
 
 void VideoCanvas::setSubtitleText(const QString &text) {
@@ -69,7 +70,7 @@ void VideoCanvas::mouseDoubleClickEvent(QMouseEvent *event) {
 
 void VideoCanvas::resizeEvent(QResizeEvent *event) {
     QGraphicsView::resizeEvent(event);
-    fitVideo();
+    if (!manualTransformActive) fitVideo();
 
     // Reposition subtitle on resize if visible
     if (subtitleLabel->isVisible()) {
@@ -84,6 +85,7 @@ void VideoCanvas::wheelEvent(QWheelEvent *event) {
     double scaleFactor = 1.15;
     if (event->angleDelta().y() > 0) scale(scaleFactor, scaleFactor);
     else scale(1.0 / scaleFactor, 1.0 / scaleFactor);
+    manualTransformActive = true;
 }
 
 void VideoCanvas::rotate() {
