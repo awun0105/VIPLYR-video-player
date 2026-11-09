@@ -12,6 +12,8 @@ public:
     // Removes an item. Returns true when the removed item was the current one;
     // the current index then points at the item that took its place (or -1).
     bool removeAt(int index);
+    // Moves an item to a new position; the current item stays the current item.
+    bool move(int from, int to);
     void clear();
 
     int count() const { return static_cast<int>(paths_.size()); }

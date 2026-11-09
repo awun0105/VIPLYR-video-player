@@ -72,6 +72,22 @@ int rotationDegrees(const AVStream *video) {
     return ((clockwise % 360) + 360) % 360;
 }
 
+std::string metadataValue(const AVStream *stream, const char *key) {
+    const AVDictionaryEntry *entry = av_dict_get(stream->metadata, key, nullptr, 0);
+    return entry ? entry->value : "";
+}
+
+TrackInfo describeTrack(const AVStream *stream) {
+    TrackInfo track;
+    track.streamIndex = stream->index;
+    track.language = metadataValue(stream, "language");
+    track.title = metadataValue(stream, "title");
+    track.codec = avcodec_get_name(stream->codecpar->codec_id);
+    const AVCodecDescriptor *descriptor = avcodec_descriptor_get(stream->codecpar->codec_id);
+    track.isText = descriptor && (descriptor->props & AV_CODEC_PROP_TEXT_SUB);
+    return track;
+}
+
 }  // namespace
 
 std::string errorText(int averror) {
@@ -112,7 +128,9 @@ AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string
 
     std::string hardware;
     const bool isVideo = stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO;
-    if (isVideo && hwAccel != HwAccel::None) hardware = tryHardware(context, codec, hwAccel);
+    // Interlaced video is deinterlaced by a CPU filter, so it is decoded on the CPU too.
+    const bool allowHardware = isVideo && hwAccel != HwAccel::None && !isInterlaced(stream);
+    if (allowHardware) hardware = tryHardware(context, codec, hwAccel);
     if (hardware.empty()) {
         context->thread_count = 0;  // let FFmpeg use every CPU core
         context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
@@ -128,7 +146,23 @@ AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string
     return context;
 }
 
-double startOffsetSeconds(const AVFormatContext *format) {
+HwAccel effectiveHwAccel(const OpenOptions &options) {
+    if (options.hwAccel != HwAccel::Auto) return options.hwAccel;
+    return options.keepHwFrames ? HwAccel::Auto : HwAccel::None;
+}
+
+bool isInterlaced(const AVStream *video) {
+    switch (video->codecpar->field_order) {
+        case AV_FIELD_TT:
+        case AV_FIELD_BB:
+        case AV_FIELD_TB:
+        case AV_FIELD_BT: return true;
+        default:          return false;
+    }
+}
+
+double startOffsetSeconds(const AVFormatContext *format, const AVStream *video) {
+    if (video && video->start_time != AV_NOPTS_VALUE) return toSeconds(video->start_time, video->time_base);
     if (format->start_time == AV_NOPTS_VALUE) return 0.0;
     return static_cast<double>(format->start_time) / AV_TIME_BASE;
 }
@@ -154,11 +188,22 @@ MediaInfo describeMedia(const AVFormatContext *format, const AVStream *video, co
         info.frameRate = 1.0 / frameDurationSeconds(video);
         info.rotationDegrees = rotationDegrees(video);
         info.videoCodec = avcodec_get_name(video->codecpar->codec_id);
+        info.isInterlaced = isInterlaced(video);
+        const AVRational pixelAspect = av_guess_sample_aspect_ratio(
+            const_cast<AVFormatContext *>(format), const_cast<AVStream *>(video), nullptr);
+        if (pixelAspect.num > 0 && pixelAspect.den > 0) info.pixelAspectRatio = av_q2d(pixelAspect);
         info.hardwareDecoder = hardwareName;
     }
     if (audio) {
         info.hasAudio = true;
         info.audioCodec = avcodec_get_name(audio->codecpar->codec_id);
+        info.audioStreamIndex = audio->index;
+    }
+    for (unsigned i = 0; i < format->nb_streams; ++i) {
+        const AVStream *stream = format->streams[i];
+        const AVMediaType type = stream->codecpar->codec_type;
+        if (type == AVMEDIA_TYPE_AUDIO) info.audioTracks.push_back(describeTrack(stream));
+        else if (type == AVMEDIA_TYPE_SUBTITLE) info.subtitleTracks.push_back(describeTrack(stream));
     }
     return info;
 }

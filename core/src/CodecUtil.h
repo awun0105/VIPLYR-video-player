@@ -40,11 +40,19 @@ AVFormatContext *openInput(const std::string &url, const OpenOptions &options, s
 AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string *hardwareName,
                             std::string *error);
 
-// Seconds to subtract from stream timestamps so that the media starts at 0.
-double startOffsetSeconds(const AVFormatContext *format);
+// Resolves HwAccel::Auto for a video stream (see HwAccel::Auto).
+HwAccel effectiveHwAccel(const OpenOptions &options);
+
+// Seconds to subtract from stream timestamps so that the first video frame is at 0.
+// Files often start a little before or after zero (audio priming, broadcast streams).
+// `video` may be null for audio-only media.
+double startOffsetSeconds(const AVFormatContext *format, const AVStream *video);
 
 MediaInfo describeMedia(const AVFormatContext *format, const AVStream *video, const AVStream *audio,
                         const std::string &hardwareName);
+
+// True when the stream is declared as interlaced.
+bool isInterlaced(const AVStream *video);
 
 // Estimated duration of one video frame, in seconds.
 double frameDurationSeconds(const AVStream *video);

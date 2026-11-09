@@ -13,6 +13,7 @@
 #include "BoundedQueue.h"
 #include "Clock.h"
 #include "CodecUtil.h"
+#include "Deinterlacer.h"
 
 namespace viplyr {
 
@@ -87,7 +88,8 @@ private:
     void pushControl(PacketItem::Kind kind, int serial, double seekTarget);
 
     void videoDecodeLoop();
-    void receiveVideoFrames(int serial, double discardBefore);
+    void receiveVideoFrames(int serial, double discardBefore, bool endOfStream);
+    void queueVideoFrame(AVFrame *frame, int serial, double discardBefore, double *nextPts);
 
     void audioDecodeLoop();
     void receiveAudioFrames(int serial, double discardBefore);
@@ -108,6 +110,7 @@ private:
     const AVStream *videoStream_ = nullptr;
     const AVStream *audioStream_ = nullptr;
     bool keepHwFrames_ = false;
+    bool deinterlace_ = false;
     double startOffset_ = 0.0;
 
     BoundedQueue<PacketItem> videoPackets_{kVideoPacketCapacity};
@@ -116,6 +119,7 @@ private:
 
     Clock clock_;
     AudioTempoFilter tempoFilter_;
+    Deinterlacer deinterlacer_;
     AudioFormat audioFormat_;
 
     std::thread demuxThread_;
@@ -151,16 +155,18 @@ bool Player::Impl::open(const std::string &url, const OpenOptions &options, std:
     if (!format_) return false;
 
     const int videoIndex = av_find_best_stream(format_, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    const int audioIndex = av_find_best_stream(format_, AVMEDIA_TYPE_AUDIO, -1, videoIndex, nullptr, 0);
+    const int audioIndex = av_find_best_stream(format_, AVMEDIA_TYPE_AUDIO, options.audioStreamIndex,
+                                               videoIndex, nullptr, 0);
 
     std::string hardwareName;
     if (videoIndex >= 0) {
         videoStream_ = format_->streams[videoIndex];
-        videoDecoder_ = openDecoder(videoStream_, options.hwAccel, &hardwareName, error);
+        videoDecoder_ = openDecoder(videoStream_, effectiveHwAccel(options), &hardwareName, error);
         if (!videoDecoder_) {
             close();
             return false;
         }
+        deinterlace_ = isInterlaced(videoStream_);
     }
     // Without an audio sink the audio stream is ignored and the clock free-runs.
     if (audioIndex >= 0 && audioSink_) {
@@ -177,7 +183,7 @@ bool Player::Impl::open(const std::string &url, const OpenOptions &options, std:
     }
 
     keepHwFrames_ = options.keepHwFrames;
-    startOffset_ = startOffsetSeconds(format_);
+    startOffset_ = startOffsetSeconds(format_, videoStream_);
     info_ = describeMedia(format_, videoStream_, audioStream_, hardwareName);
 
     abort_ = false;
@@ -219,6 +225,7 @@ void Player::Impl::close() {
 
     if (hasAudio()) audioSink_->flush();
     tempoFilter_.reset();
+    deinterlacer_.reset();
     avcodec_free_context(&videoDecoder_);
     avcodec_free_context(&audioDecoder_);
     avformat_close_input(&format_);
@@ -388,6 +395,7 @@ void Player::Impl::videoDecodeLoop() {
 
         if (item.kind == PacketItem::Kind::Flush) {
             avcodec_flush_buffers(videoDecoder_);
+            deinterlacer_.reset();
             serial = item.serial;
             discardBefore = item.seekTarget;
             continue;
@@ -396,29 +404,50 @@ void Player::Impl::videoDecodeLoop() {
 
         if (item.kind == PacketItem::Kind::Drain) {
             avcodec_send_packet(videoDecoder_, nullptr);
-            receiveVideoFrames(serial, discardBefore);
+            receiveVideoFrames(serial, discardBefore, true);
             videoFinishedSerial_ = serial;
             continue;
         }
         if (avcodec_send_packet(videoDecoder_, item.packet.get()) < 0) continue;  // skip corrupt data
-        receiveVideoFrames(serial, discardBefore);
+        receiveVideoFrames(serial, discardBefore, false);
     }
 }
 
-void Player::Impl::receiveVideoFrames(int serial, double discardBefore) {
+void Player::Impl::receiveVideoFrames(int serial, double discardBefore, bool endOfStream) {
     FramePtr decoded(av_frame_alloc());
+    FramePtr deinterlaced(av_frame_alloc());
     double nextPts = lastVideoPts_;
 
-    while (!abort_ && avcodec_receive_frame(videoDecoder_, decoded.get()) == 0) {
-        FrameItem item;
-        item.frame = makeVideoFrame(decoded.get(), videoStream_, startOffset_, keepHwFrames_, &nextPts);
-        item.serial = serial;
-        if (!item.frame.isValid()) continue;
-        if (item.frame.pts() + item.frame.duration() <= discardBefore + kSeekToleranceSeconds) continue;
+    const auto queueDeinterlaced = [&] {
+        while (!abort_ && deinterlacer_.pull(deinterlaced.get())) {
+            queueVideoFrame(deinterlaced.get(), serial, discardBefore, &nextPts);
+        }
+    };
 
-        // Blocks while the frame queue is full; gives up when a seek makes the frame obsolete.
-        while (!abort_ && serial == serial_ && !videoFrames_.push(item, milliseconds(10))) {}
+    while (!abort_ && avcodec_receive_frame(videoDecoder_, decoded.get()) == 0) {
+        if (!deinterlace_) {
+            queueVideoFrame(decoded.get(), serial, discardBefore, &nextPts);
+            continue;
+        }
+        deinterlacer_.push(decoded.get(), videoStream_->time_base);
+        av_frame_unref(decoded.get());
+        queueDeinterlaced();
     }
+    if (deinterlace_ && endOfStream) {
+        deinterlacer_.finish();  // release the frame the filter was still holding
+        queueDeinterlaced();
+    }
+}
+
+void Player::Impl::queueVideoFrame(AVFrame *frame, int serial, double discardBefore, double *nextPts) {
+    FrameItem item;
+    item.frame = makeVideoFrame(frame, videoStream_, startOffset_, keepHwFrames_, nextPts);
+    item.serial = serial;
+    if (!item.frame.isValid()) return;
+    if (item.frame.pts() + item.frame.duration() <= discardBefore + kSeekToleranceSeconds) return;
+
+    // Blocks while the frame queue is full; gives up when a seek makes the frame obsolete.
+    while (!abort_ && serial == serial_ && !videoFrames_.push(item, milliseconds(10))) {}
 }
 
 // ------------------------------------------------------------- audio decode

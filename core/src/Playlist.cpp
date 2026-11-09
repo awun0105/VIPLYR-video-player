@@ -24,6 +24,21 @@ bool Playlist::removeAt(int index) {
     return removedCurrent;
 }
 
+bool Playlist::move(int from, int to) {
+    if (from < 0 || from >= count() || to < 0 || to >= count()) return false;
+    if (from == to) return true;
+
+    const bool movingCurrent = from == currentIndex_;
+    std::string moved = std::move(paths_[from]);
+    paths_.erase(paths_.begin() + from);
+    paths_.insert(paths_.begin() + to, std::move(moved));
+
+    if (movingCurrent) currentIndex_ = to;
+    else if (from < currentIndex_ && to >= currentIndex_) --currentIndex_;
+    else if (from > currentIndex_ && to <= currentIndex_) ++currentIndex_;
+    return true;
+}
+
 void Playlist::clear() {
     paths_.clear();
     currentIndex_ = -1;

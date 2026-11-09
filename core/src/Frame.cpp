@@ -19,6 +19,8 @@ AVPixelFormat toAvFormat(PixelFormat format) {
     switch (format) {
         case PixelFormat::Yuv420p: return AV_PIX_FMT_YUV420P;
         case PixelFormat::Nv12:    return AV_PIX_FMT_NV12;
+        case PixelFormat::Yuv420p10: return AV_PIX_FMT_YUV420P10LE;
+        case PixelFormat::P010:    return AV_PIX_FMT_P010LE;
         case PixelFormat::Bgr24:   return AV_PIX_FMT_BGR24;
         case PixelFormat::Rgba:    return AV_PIX_FMT_RGBA;
         default:                   return AV_PIX_FMT_NONE;
@@ -45,6 +47,8 @@ PixelFormat VideoFrame::format() const {
         case AV_PIX_FMT_YUV420P:
         case AV_PIX_FMT_YUVJ420P: return PixelFormat::Yuv420p;
         case AV_PIX_FMT_NV12:     return PixelFormat::Nv12;
+        case AV_PIX_FMT_YUV420P10LE: return PixelFormat::Yuv420p10;
+        case AV_PIX_FMT_P010LE:   return PixelFormat::P010;
         case AV_PIX_FMT_BGR24:    return PixelFormat::Bgr24;
         case AV_PIX_FMT_RGBA:     return PixelFormat::Rgba;
         default:                  return PixelFormat::Unknown;
@@ -61,6 +65,18 @@ bool VideoFrame::isBt709() const {
     if (frame_->colorspace == AVCOL_SPC_BT709) return true;
     if (frame_->colorspace == AVCOL_SPC_UNSPECIFIED) return frame_->height >= 720;  // HD convention
     return false;
+}
+
+bool VideoFrame::isBt2020() const {
+    if (!frame_) return false;
+    return frame_->colorspace == AVCOL_SPC_BT2020_NCL || frame_->colorspace == AVCOL_SPC_BT2020_CL;
+}
+
+TransferFunction VideoFrame::transfer() const {
+    if (!frame_) return TransferFunction::Sdr;
+    if (frame_->color_trc == AVCOL_TRC_SMPTE2084) return TransferFunction::Pq;
+    if (frame_->color_trc == AVCOL_TRC_ARIB_STD_B67) return TransferFunction::Hlg;
+    return TransferFunction::Sdr;
 }
 
 const uint8_t *VideoFrame::plane(int index) const { return frame_ ? frame_->data[index] : nullptr; }
@@ -92,7 +108,8 @@ VideoFrame VideoFrame::convert(PixelFormat target, int width, int height) const 
     if (!scaler) return {};
 
     // Tell swscale which colour matrix and range the source uses, so RGB output is correct.
-    const int *matrix = sws_getCoefficients(isBt709() ? SWS_CS_ITU709 : SWS_CS_ITU601);
+    const int standard = isBt2020() ? SWS_CS_BT2020 : isBt709() ? SWS_CS_ITU709 : SWS_CS_ITU601;
+    const int *matrix = sws_getCoefficients(standard);
     sws_setColorspaceDetails(scaler, matrix, isFullRange() ? 1 : 0, matrix, 1, 0, 1 << 16, 1 << 16);
 
     AVFrame *converted = av_frame_alloc();

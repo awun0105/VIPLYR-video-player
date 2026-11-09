@@ -10,10 +10,15 @@ enum class PixelFormat {
     Unknown,   // a CPU format the renderer does not handle directly; use convert()
     Yuv420p,   // 3 planes: Y, U, V
     Nv12,      // 2 planes: Y, interleaved UV
+    Yuv420p10, // 3 planes of 16-bit samples, value in the low 10 bits
+    P010,      // 2 planes of 16-bit samples, value in the high 10 bits
     Bgr24,     // 1 plane, matches cv::Mat CV_8UC3
     Rgba,      // 1 plane
     Hardware,  // pixels live on the GPU; use download() to read them
 };
+
+// How sample values map to light. Pq and Hlg are the two HDR curves.
+enum class TransferFunction { Sdr, Pq, Hlg };
 
 // A decoded video frame. Copying is cheap: copies share the same pixel buffer.
 class VideoFrame {
@@ -33,6 +38,8 @@ public:
     bool isHardware() const { return format() == PixelFormat::Hardware; }
     bool isFullRange() const;  // full (0-255) instead of limited (16-235) range
     bool isBt709() const;      // BT.709 colour matrix instead of BT.601
+    bool isBt2020() const;     // BT.2020 wide-gamut colour (used by HDR video)
+    TransferFunction transfer() const;
 
     const uint8_t *plane(int index) const;
     int stride(int index) const;  // bytes per row of the plane

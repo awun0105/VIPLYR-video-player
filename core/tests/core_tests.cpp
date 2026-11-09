@@ -12,6 +12,7 @@
 #include "viplyr/FrameReader.h"
 #include "viplyr/Player.h"
 #include "viplyr/Playlist.h"
+#include "viplyr/SubtitleReader.h"
 
 using namespace viplyr;
 
@@ -141,6 +142,14 @@ void testPlaylist() {
 
     playlist.append({"x"});
     CHECK(playlist.currentIndex() == 0 && playlist.contains("x") && !playlist.contains("y"));
+
+    // Moving items keeps the current item current.
+    playlist.assign({"a", "b", "c", "d"});
+    playlist.setCurrentIndex(1);                                   // "b"
+    CHECK(playlist.move(0, 3) && playlist.at(playlist.currentIndex()) == "b");
+    CHECK(playlist.move(3, 0) && playlist.at(playlist.currentIndex()) == "b");
+    CHECK(playlist.move(1, 2) && playlist.currentIndex() == 2 && playlist.at(2) == "b");
+    CHECK(!playlist.move(0, 9));
 }
 
 void testFrameReader(const std::string &clip, HwAccel hwAccel, const char *label) {
@@ -284,20 +293,85 @@ void testPlayer(const std::string &clip, bool withAudio) {
     CHECK(player.state() == State::Stopped);
 }
 
+// The second clip: interlaced 360x288 shown as 16:9, two audio tracks, one subtitle track.
+void testTracksAndFormats(const std::string &clip) {
+    std::printf("tracks, interlacing and pixel aspect\n");
+    FrameReader reader;
+    std::string error;
+    CHECK(reader.open(clip, {}, &error));
+    if (!reader.isOpen()) {
+        std::printf("  %s\n", error.c_str());
+        return;
+    }
+    const MediaInfo info = reader.info();
+    CHECK(info.isInterlaced);
+    CHECK(info.hardwareDecoder.empty());                 // interlaced video is decoded on the CPU
+    CHECK(near(info.pixelAspectRatio * 360.0 / 288.0, 16.0 / 9.0, 0.01));
+    CHECK(info.audioTracks.size() == 2);
+    CHECK(info.subtitleTracks.size() == 1);
+    if (info.audioTracks.size() == 2) {
+        CHECK(info.audioTracks[0].language == "eng" && info.audioTracks[1].language == "vie");
+    }
+
+    // Deinterlacing keeps every frame and its timestamp (2 s at 25 fps).
+    int count = 0;
+    double previousPts = -1.0;
+    bool increasing = true;
+    VideoFrame frame;
+    while (reader.read(frame)) {
+        if (frame.pts() <= previousPts) increasing = false;
+        previousPts = frame.pts();
+        ++count;
+    }
+    CHECK(count == 50);
+    CHECK(increasing);
+    CHECK(near(previousPts, 49 / 25.0, 0.001));
+    CHECK(reader.seek(1.0) && reader.read(frame) && near(frame.pts(), 1.0, 0.001));
+
+    // Embedded subtitles.
+    if (info.subtitleTracks.size() == 1) {
+        CHECK(info.subtitleTracks[0].isText);
+        const std::vector<SubtitleCue> cues = readSubtitleTrack(clip, info.subtitleTracks[0].streamIndex);
+        CHECK(cues.size() == 2);
+        if (cues.size() == 2) {
+            CHECK(near(cues[0].start, 0.2, 0.01) && near(cues[0].end, 0.9, 0.01));
+            CHECK(cues[0].text == "First line");
+            CHECK(cues[1].text == "Second\nline");
+        }
+    }
+
+    // Playing the second audio track.
+    RecordingVideoSink video;
+    RealTimeAudioSink audio;
+    Player player;
+    player.addVideoSink(&video);
+    player.setAudioSink(&audio);
+    OpenOptions options;
+    if (info.audioTracks.size() == 2) options.audioStreamIndex = info.audioTracks[1].streamIndex;
+    CHECK(player.open(clip, options, &error));
+    CHECK(player.info().audioStreamIndex == options.audioStreamIndex);
+    player.play();
+    sleepSeconds(0.5);
+    CHECK(audio.framesWritten > 0);
+    CHECK(video.snapshot().size() >= 10);  // the interlaced path delivers frames in real time
+    player.close();
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <test_clip.mp4>\n", argv[0]);
+    if (argc < 3) {
+        std::fprintf(stderr, "usage: %s <test_clip.mp4> <test_tracks.mkv>\n", argv[0]);
         return 2;
     }
     const std::string clip = argv[1];
 
     testPlaylist();
     testFrameReader(clip, HwAccel::None, "cpu");
-    testFrameReader(clip, HwAccel::Auto, "auto hardware");
+    testFrameReader(clip, HwAccel::Vaapi, "vaapi if available");
     testPlayer(clip, true);
     testPlayer(clip, false);
+    testTracksAndFormats(argv[2]);
 
     std::printf(failures == 0 ? "ALL PASSED\n" : "%d FAILURE(S)\n", failures);
     return failures == 0 ? 0 : 1;
