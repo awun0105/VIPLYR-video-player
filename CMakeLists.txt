@@ -1,13 +1,20 @@
-cmake_minimum_required(VERSION 3.5)
-project(VideoPlayerPro LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(Viplyr LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt5 COMPONENTS Widgets Multimedia MultimediaWidgets Concurrent DBus REQUIRED)
+option(VIPLYR_BUILD_APP "Build the Qt6 desktop player" ON)
+option(VIPLYR_BUILD_TESTS "Build the core tests and examples" ON)
 
-file(GLOB_RECURSE SRC_FILES "src/*.cpp")
+# The playback engine: depends on FFmpeg only, usable without Qt.
+add_subdirectory(core)
 
-add_executable(Viplyr ${SRC_FILES})
-target_link_libraries(Viplyr PRIVATE Qt5::Widgets Qt5::Multimedia Qt5::MultimediaWidgets Qt5::Concurrent Qt5::DBus)
+if(VIPLYR_BUILD_APP)
+    add_subdirectory(app)
+endif()
