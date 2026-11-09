@@ -133,6 +133,6 @@ phụ đề dài tự xuống dòng, không mở chồng hộp thoại lỗi.
 ## 9. Phụ thuộc
 
 ```
-sudo apt install qt6-base-dev qt6-multimedia-dev libqt6opengl6-dev \
+sudo apt install pkg-config qt6-base-dev qt6-multimedia-dev \
   libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev
 ```

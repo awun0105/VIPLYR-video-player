@@ -1,4 +1,4 @@
-.PHONY: all setup build run start clean
+.PHONY: all setup build run start test clean
 
 # Mặc định gõ 'make' sẽ tự động build nhanh và chạy app
 all: start
@@ -19,6 +19,10 @@ run:
 
 # Tự động kết hợp: Build nhanh xong thì Chạy luôn
 start: build run
+
+# Chạy bộ kiểm thử của lõi (không cần màn hình)
+test: build
+	ctest --test-dir build --output-on-failure
 
 # Lệnh xóa nhanh nếu cần
 clean:

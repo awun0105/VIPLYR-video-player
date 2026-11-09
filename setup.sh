@@ -6,15 +6,11 @@ set -e
 echo "🧹 1. Cleaning up old cache..."
 rm -rf build
 
-echo "📁 2. Creating a new environment..."
-mkdir build
-cd build
+echo "⚙️ 2. Configuring CMake with Ninja (Release)..."
+cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-echo "⚙️ 3. Configuring CMake with Ninja..."
-cmake -G Ninja ..
-
-echo "🚀 4. Compiling..."
-ninja
+echo "🚀 3. Compiling..."
+ninja -C build
 
 echo "========================================="
 echo "✅ SUCCESS! The application is ready."

@@ -1,41 +1,37 @@
 # Viplyr - A Simple & Powerful Video Player for Linux
 
-**Viplyr** is an open-source video player built with **C++11** and **Qt5**. 
-It is a lightweight yet feature-rich application optimized for **Linux** (Ubuntu, Debian, etc.), featuring a clean MVC architecture and high-performance background processing.
+**Viplyr** is an open-source video player built with **C++17**, **FFmpeg** and **Qt6**. 
+It is a lightweight yet feature-rich application optimized for **Linux** (Ubuntu, Debian, etc.), built around its own playback engine (`viplyr_core`) that can be reused without the UI in robotics, simulation and computer-vision projects.
 
 ---
 
 ## 1. Project Folder Structure
 
-The project maintains a strict separation between **UI**, **Core Logic**, and **Utilities**:
-
 ```text
 Viplyr/
-├── Makefile                 # Convenience targets: build/run/setup/clean
-├── CMakeLists.txt           # CMake configuration with QtConcurrent/QtDBus support
-├── setup.sh                 # Clean + configure (CMake) + build (Ninja)
+├── CMakeLists.txt           # Top level: builds core/, and app/ unless VIPLYR_BUILD_APP=OFF
+├── Makefile, setup.sh       # Convenience build/run/test targets
+├── docs/                    # Design notes and the integration guide
 │
-├── icon/
-│   └── viplyr_icon.png      # Application icon
+├── core/                    # viplyr_core: the playback engine (C++17 + FFmpeg, no Qt)
+│   ├── include/viplyr/      # Public API
+│   │   ├── Player.h         # Play, pause, seek, step, rate; audio/video sync
+│   │   ├── FrameReader.h    # Read frames one by one (batch work, thumbnails)
+│   │   ├── Frame.h          # VideoFrame: pixels, timestamp, conversion to BGR/RGBA
+│   │   ├── Sinks.h          # IVideoSink / IAudioSink extension points
+│   │   ├── MediaInfo.h      # MediaInfo, OpenOptions, HwAccel
+│   │   └── Playlist.h
+│   ├── src/                 # Pipeline threads, clock, queues, FFmpeg helpers
+│   ├── tests/               # Headless tests (ctest)
+│   └── examples/            # frame_dump: a frame as a BGR image
 │
-└── src/
-    ├── main.cpp             # Program entry point
-    │
-    ├── Utils/               # Utility & Background Logic
-    │   ├── Theme.h          # UI styles (CSS)
-    │   ├── Constants.h      # Global constants & time formatting
-    │   ├── SubtitleParser.h # SRT file parsing
-    │   └── ThumbnailExtractor.h # Async frame capture
-    │
-    ├── Core/                # Core logic layer (Encapsulated)
-    │   ├── MediaEngine.h
-    │   └── MediaEngine.cpp  # Video playback, playlist, & sync logic
-    │
-    └── UI/                  # User Interface layer
-        ├── Components.h/.cpp    # Custom Sliders, Control Bar, Panels
-        ├── VideoCanvas.h/.cpp   # Video display (Zoom, Pan, Rotate, Subtitles)
-        ├── ThumbnailPopup.h/.cpp # Preview popup component
-        └── MainWindow.h/.cpp    # Main window orchestrator
+└── app/                     # The Qt6 desktop player, a thin layer over the core
+    ├── PlayerController     # Playback model the UI talks to
+    ├── VideoWidget          # OpenGL video output (zoom, pan, rotate, subtitles)
+    ├── AudioOutput          # Audio device output
+    ├── ThumbnailProvider    # Seek-bar previews on a worker thread
+    ├── SubtitleTrack        # .srt loading and lookup
+    └── MainWindow, ControlBar, PlaylistPanel, StartPanel, ...
 ```
 
 ---
@@ -47,9 +43,11 @@ Viplyr/
 - **Asynchronous Loading**: Process thousands of files without freezing the UI.
 - **Playback Speed**: Adjust speed from **0.5x to 2.0x**.
 - **Subtitles**: Automatic detection and real-time sync for **.srt** files (Binary Search optimized).
+- **Hardware Decoding**: VAAPI and NVDEC/CUDA, with automatic fallback to the CPU.
+- **Frame-Accurate Seeking & Stepping**: Seek to an exact frame and step frame by frame.
 
 ### 🖱️ Interactive UI
-- **Thumbnail Preview**: Hover over the seek bar to see video frames (Cached & Throttled).
+- **Thumbnail Preview**: Hover over the seek bar to see video frames (cached; only the latest request is decoded).
 - **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
 - **Playlist Search**: Real-time filtering for large video collections.
 - **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
@@ -70,6 +68,7 @@ Viplyr/
 | `T` | Toggle Always on Top |
 | `R` | Rotate Video 90° |
 | `Left` / `Right` | Seek backward / forward 5s |
+| `,` / `.` | Step one frame back / forward |
 | `Up` / `Down` | Increase / Decrease Volume |
 | `Esc` | Exit Fullscreen |
 | `Double Click` | Toggle Fullscreen |
@@ -80,12 +79,12 @@ Viplyr/
 
 ## 3. Project Architecture
 
-Viplyr follows a **Strict MVC (Model-View-Controller)** pattern:
-- **Core (Model)**: `MediaEngine` encapsulates `QMediaPlayer` and `QMediaPlaylist`. It handles all state and emits signals.
-- **UI (View)**: Dedicated widgets for canvas, controls, and popups.
-- **MainWindow (Controller)**: Centralizes all signal/slot connections and manages high-level application flow.
+Viplyr is split into two parts with a one-way dependency: the app uses the core, the core knows nothing about the app.
 
-**Performance Note**: Heavy tasks (file filtering, thumbnail extraction) are offloaded to worker threads using `QtConcurrent`, ensuring a 60FPS responsive interface.
+- **`viplyr_core`** — a pipeline of four threads: demux → decode (video and audio) → present. An audio-driven clock keeps picture and sound in sync. Decoded frames are delivered to any number of `IVideoSink`s, so a display, a computer-vision stage and a recorder can all receive the same frames.
+- **`app`** — `PlayerController` wraps the engine for the UI (signals, playlist, subtitles); `MainWindow` only builds widgets and connects them.
+
+To use the engine in another project, build with `-DVIPLYR_BUILD_APP=OFF` and link `viplyr_core`. See [docs/integration.md](docs/integration.md).
 
 ---
 
@@ -94,11 +93,14 @@ Viplyr follows a **Strict MVC (Model-View-Controller)** pattern:
 ### Prerequisites
 ```bash
 sudo apt update
-sudo apt install build-essential cmake ninja-build \
-                 qtbase5-dev qtmultimedia5-dev libqt5multimediawidgets5
+sudo apt install build-essential cmake ninja-build pkg-config \
+                 qt6-base-dev qt6-multimedia-dev \
+                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev
 ```
 
-`qtbase5-dev` provides the QtDBus module used to inhibit desktop idle sleep during playback.
+Qt 6.4 or newer and FFmpeg 6.1 or newer are required. `make test` runs the engine's headless tests.
+
+Set `VIPLYR_HWACCEL=none` (or `vaapi`, `cuda`) to override the automatic choice of decoder.
 
 ### Build & Install
 1. **Clone & Build**:

@@ -22,7 +22,6 @@ if(VIPLYR_BUILD_TESTS)
 
     find_program(FFMPEG_EXECUTABLE ffmpeg)
     if(FFMPEG_EXECUTABLE)
-        enable_testing()
         # A 3 s, 30 fps clip with B-frames, one keyframe per second and a sine tone.
         set(TEST_CLIP ${CMAKE_CURRENT_BINARY_DIR}/test_clip.mp4)
         add_custom_command(OUTPUT ${TEST_CLIP}

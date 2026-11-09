@@ -12,6 +12,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(VIPLYR_BUILD_APP "Build the Qt6 desktop player" ON)
 option(VIPLYR_BUILD_TESTS "Build the core tests and examples" ON)
 
+if(VIPLYR_BUILD_TESTS)
+    enable_testing()
+endif()
+
 # The playback engine: depends on FFmpeg only, usable without Qt.
 add_subdirectory(core)
 
