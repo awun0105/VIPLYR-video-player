@@ -1,13 +1,20 @@
 #pragma once
 #include <QString>
 #include <QVector>
+#include <vector>
 
-// The subtitles of one video, loaded from an .srt file.
+#include "viplyr/SubtitleReader.h"
+
+// The subtitles of one video: from the .srt file next to it, or from a track inside it.
 class SubtitleTrack {
 public:
-    // Loads the .srt file that sits next to the video and has the same base name.
-    // Leaves the track empty when there is none.
+    // Path of the .srt file that belongs to a video: same folder, same base name.
+    static QString externalFileFor(const QString &videoPath);
+
+    // Loads that .srt file. Leaves the track empty when there is none.
     void loadForVideo(const QString &videoPath);
+    // Uses cues read from a subtitle track embedded in the video.
+    void setCues(const std::vector<viplyr::SubtitleCue> &cues);
     void clear() { cues_.clear(); }
     bool isEmpty() const { return cues_.isEmpty(); }
 

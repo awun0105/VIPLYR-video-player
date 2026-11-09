@@ -4,23 +4,26 @@
 class JumpSlider;
 class QComboBox;
 class QLabel;
-class QPushButton;
+class QToolButton;
 
-// The bar under the video: transport buttons, seek bar, time, speed and volume.
+// The controls drawn over the bottom of the video: seek bar, transport buttons,
+// time, speed, volume and the tool buttons.
 class ControlBar : public QWidget {
     Q_OBJECT
 public:
     explicit ControlBar(QWidget *parent = nullptr);
 
     JumpSlider *seekSlider() const { return seekSlider_; }
+    QToolButton *tracksButton() const { return tracksButton_; }  // anchor for the tracks menu
     int volume() const;
+    qreal playbackRate() const;
 
 public slots:
     void setPlaying(bool playing);
-    void setPlaylistVisible(bool visible);
     void setPosition(qint64 milliseconds);
     void setDuration(qint64 milliseconds);
     void setVolume(int percent);
+    void setPlaybackRate(qreal rate);
     void toggleMute();
 
 signals:
@@ -30,12 +33,20 @@ signals:
     void previousClicked();
     void rewindClicked();
     void forwardClicked();
-    void playlistToggleRequested();
     void seekRequested(qint64 milliseconds);
     void volumeChanged(int percent);
     void playbackRateChanged(qreal rate);
+    void tracksRequested();
+    void editRequested();
+    void snapshotRequested();
+    void playlistToggleRequested();
+    void fullscreenRequested();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
 
 private:
+    QToolButton *createButton(const QIcon &icon, const QString &toolTip);
     void updateTimeLabel();
     void updateVolumeIcon(int percent);
 
@@ -43,9 +54,9 @@ private:
     JumpSlider *volumeSlider_;
     QComboBox *speedCombo_;
     QLabel *timeLabel_;
-    QPushButton *playButton_;
-    QPushButton *muteButton_;
-    QPushButton *playlistButton_;
+    QToolButton *playButton_;
+    QToolButton *muteButton_;
+    QToolButton *tracksButton_;
     qint64 position_ = 0;
     qint64 duration_ = 0;
     int volumeBeforeMute_ = 100;

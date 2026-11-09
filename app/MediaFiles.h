@@ -21,4 +21,7 @@ QString fileDialogFilter();
 // "mm:ss", or "hh:mm:ss" from one hour up.
 QString formatTime(qint64 milliseconds);
 
+// "hh:mm:ss.mmm", for frame-exact work.
+QString formatTimePrecise(qint64 milliseconds);
+
 }  // namespace MediaFiles

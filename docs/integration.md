@@ -66,13 +66,54 @@ Low-latency settings go through `OpenOptions::formatOptions`, for example
 
 ## CPU and GPU
 
-`OpenOptions::hwAccel` selects the decoder: `Auto` (VAAPI, then CUDA, then CPU), `None`,
-`Vaapi` or `Cuda`. `MediaInfo::hardwareDecoder` tells you what was actually used.
+`OpenOptions::hwAccel` selects the decoder: `Auto`, `None`, `Vaapi` or `Cuda`.
+`MediaInfo::hardwareDecoder` tells you what was actually used.
+
+`Auto` picks what is fastest for how the frames are used: the CPU when frames are copied to
+system memory (the default), the GPU when `keepHwFrames` is set. The reason is the read-back
+cost. Measured with `decode_bench` on the development laptop (i7 + UHD 630 + Quadro T2000),
+4K 60 fps:
+
+| Decoder | H.264 | HEVC 10-bit |
+|---|---|---|
+| CPU | 296 fps | 154 fps |
+| VAAPI, copied to memory | 48 fps | 25 fps |
+| VAAPI, kept on GPU | 315 fps | 229 fps |
+| CUDA, copied to memory | 76 fps | 114 fps |
+| CUDA, kept on GPU | 159 fps | 310 fps |
+
+These are synthetic clips; run `decode_bench <your video>` for your own material.
 
 By default a frame decoded on the GPU is copied to system memory, so every sink can read it.
 Set `OpenOptions::keepHwFrames = true` to leave frames on the GPU: `frame.isHardware()` is
 then true, `frame.native()` gives the underlying `AVFrame` (VAAPI surface or CUDA frame) for
 zero-copy consumers, and `frame.download()` returns a CPU copy when one is needed.
+
+## Tracks, subtitles and special formats
+
+- `MediaInfo::audioTracks` / `subtitleTracks` list what the file contains; play another audio
+  track with `OpenOptions::audioStreamIndex`.
+- `readSubtitleTrack(url, streamIndex)` (`viplyr/SubtitleReader.h`) returns the cues of a text
+  subtitle track. It scans the whole file, so call it from a worker thread.
+- Interlaced video is deinterlaced automatically (on the CPU). `MediaInfo::pixelAspectRatio`
+  tells you the shape of one pixel. 10-bit frames arrive as `Yuv420p10` or `P010`;
+  `VideoFrame::transfer()` reports HDR (PQ/HLG). `convert()` to `Bgr24` does not tone-map.
+
+## Overlays in the desktop player
+
+The player draws annotations from a JSON file next to the video, named
+`<video name>.overlay.json`. Coordinates are in video pixels, `t` in seconds, and an entry
+stays on screen until the next entry's time:
+
+```json
+{ "frames": [
+  { "t": 1.25,
+    "boxes":  [ { "x": 10, "y": 20, "w": 100, "h": 50, "label": "car 0.92", "color": "#ff0000" } ],
+    "points": [ { "x": 60, "y": 45, "label": "centre" } ] }
+] }
+```
+
+Press `I` in the player for the frame number and exact timestamp of the frame on screen.
 
 ## ROS 2
 

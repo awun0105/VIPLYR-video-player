@@ -1,7 +1,10 @@
 #pragma once
+#include <QFuture>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
+#include <atomic>
+#include <memory>
 
 #include "AudioOutput.h"
 #include "SubtitleTrack.h"
@@ -10,9 +13,16 @@
 
 // The application's playback model: one engine, one playlist and the subtitles
 // of the current video. The UI talks only to this class, in milliseconds.
+//
+// Videos are opened on a worker thread so the window never freezes. While one
+// is opening, playback commands are ignored and position() reports 0.
 class PlayerController : public QObject {
     Q_OBJECT
 public:
+    // Special values for setSubtitleTrack(); other values are stream indexes.
+    static constexpr int kSubtitlesOff = -2;
+    static constexpr int kSubtitlesExternalFile = -1;
+
     explicit PlayerController(QObject *parent = nullptr);
     ~PlayerController() override;
 
@@ -22,15 +32,22 @@ public:
     void loadFiles(const QStringList &paths);    // replaces the playlist and plays
     void appendFiles(const QStringList &paths);  // skips paths already in the playlist
     void removeAt(int index);
+    void moveItem(int from, int to);
 
     QStringList paths() const;
     int count() const { return playlist_.count(); }
     int currentIndex() const { return playlist_.currentIndex(); }
     QString currentPath() const;
+
+    bool hasMedia() const;
+    viplyr::MediaInfo mediaInfo() const;  // of the open video; default-constructed otherwise
     qint64 position() const;
     qint64 duration() const;
-    bool isPlaying() const { return player_.state() == viplyr::State::Playing; }
+    bool isPlaying() const;
     int volume() const { return volume_; }
+    qreal playbackRate() const { return rate_; }
+    int subtitleTrack() const { return subtitleTrack_; }
+    bool hasExternalSubtitles() const;
 
 public slots:
     void play();
@@ -42,32 +59,69 @@ public slots:
     void seekTo(qint64 milliseconds);
     void seekRelative(qint64 milliseconds);
     void stepFrame(int direction);
+    void goToFrame(qint64 frameNumber);
     void setVolume(int percent);
     void setPlaybackRate(qreal rate);
     void setCurrentIndex(int index);
+    void setAudioTrack(int streamIndex);
+    void setSubtitleTrack(int track);  // kSubtitlesOff, kSubtitlesExternalFile or a stream index
 
 signals:
     void positionChanged(qint64 milliseconds);
     void durationChanged(qint64 milliseconds);
     void playingChanged(bool playing);
     void currentIndexChanged(int index);
-    void mediaOpened(const QString &path, int rotationDegrees);
+    void mediaOpened(const QString &path);
     void mediaClosed();
+    void resumed(qint64 milliseconds);  // playback continued from a remembered position
     void subtitleTextChanged(const QString &text);
     void errorOccurred(const QString &message);
 
 private:
-    void openCurrent(bool startPlaying);
+    struct OpenRequest {
+        QString path;
+        bool startPlaying = true;
+        qint64 startPositionMs = -1;  // -1: resume from the remembered position, if any
+        int audioStreamIndex = -1;
+    };
+    struct OpenResult {
+        bool ok = false;
+        std::string error;
+    };
+
+    void openCurrent(bool startPlaying, qint64 startPositionMs = -1, int audioStreamIndex = -1);
+    void startOpenTask();
+    void finishOpen(const OpenRequest &request, const OpenResult &result);
     void closeMedia();
+    void waitForOpenTask();
+
     void refreshPosition();
     void handleEnded();
+    void setSubtitleText(const QString &text);
+    void cancelSubtitleLoading();
+
+    void rememberPosition();
+    qint64 rememberedPosition(const QString &path) const;
 
     viplyr::Player player_;
     viplyr::Playlist playlist_;
     AudioOutput audioOutput_;
     SubtitleTrack subtitles_;
     QTimer positionTimer_;
+
+    // Opening happens on a worker thread; only the newest request is carried out.
+    QFuture<void> openTask_;
+    OpenRequest pendingRequest_;
+    bool isOpening_ = false;
+    bool openTaskRunning_ = false;
+    bool hasQueuedRequest_ = false;
+    int openGeneration_ = 0;  // bumped to make an already queued completion do nothing
+
+    QString openPath_;  // the video the engine has open; empty when none
     QString subtitleText_;
+    int subtitleTrack_ = kSubtitlesOff;
+    std::shared_ptr<std::atomic<bool>> subtitleLoadCancelled_;
     qint64 lastPosition_ = -1;
     int volume_ = 100;
+    qreal rate_ = 1.0;
 };

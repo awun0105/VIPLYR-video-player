@@ -9,7 +9,7 @@
 - `make build`: incremental rebuild using Ninja (fast after small changes).
 - `make run`: run the app (`./build/Viplyr`).
 - `make` / `make start`: build then run.
-- `make test`: run the engine's headless tests (`ctest`).
+- `make test`: run the headless tests (`ctest`): the engine, and real ffmpeg exports built by `ExportCommand`.
 
 Install prerequisites on Debian/Ubuntu with:
 
@@ -33,7 +33,7 @@ Run `make test` after any change in `core/`. Then verify UI changes with manual 
 1. Rebuild and launch.
 2. Drag-and-drop large directories to test async loading.
 3. Hover over the seek bar to verify thumbnail extraction.
-4. Verify hotkeys: `Space` (Play/Pause), `F` (Fullscreen), `M` (Mute), `T` (Always on Top), `R` (Rotate), `Arrows` (Volume/Seek), `,` / `.` (frame step).
+4. Verify hotkeys: `Space` (Play/Pause), `F` (Fullscreen), `M` (Mute), `T` (Always on Top), `R` (Rotate), `Arrows` (Volume/Seek), `,` / `.` (frame step), `I` (info), `S` (snapshot), `E` (export), `P` (playlist).
 5. Load a video with a matching `.srt` file to verify subtitle sync.
 
 ## Commit & Pull Request Guidelines

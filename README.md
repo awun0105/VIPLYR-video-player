@@ -19,18 +19,21 @@ Viplyr/
 │   │   ├── FrameReader.h    # Read frames one by one (batch work, thumbnails)
 │   │   ├── Frame.h          # VideoFrame: pixels, timestamp, conversion to BGR/RGBA
 │   │   ├── Sinks.h          # IVideoSink / IAudioSink extension points
-│   │   ├── MediaInfo.h      # MediaInfo, OpenOptions, HwAccel
+│   │   ├── MediaInfo.h      # MediaInfo, OpenOptions, HwAccel, tracks
+│   │   ├── SubtitleReader.h # Read a text subtitle track from a file
 │   │   └── Playlist.h
 │   ├── src/                 # Pipeline threads, clock, queues, FFmpeg helpers
 │   ├── tests/               # Headless tests (ctest)
-│   └── examples/            # frame_dump: a frame as a BGR image
+│   └── examples/            # frame_dump (frame as BGR image), decode_bench (decoder speed)
 │
 └── app/                     # The Qt6 desktop player, a thin layer over the core
     ├── PlayerController     # Playback model the UI talks to
     ├── VideoWidget          # OpenGL video output (zoom, pan, rotate, subtitles)
     ├── AudioOutput          # Audio device output
     ├── ThumbnailProvider    # Seek-bar previews on a worker thread
-    ├── SubtitleTrack        # .srt loading and lookup
+    ├── SubtitleTrack        # .srt and embedded subtitle lookup
+    ├── OverlayTrack         # Boxes, points and labels drawn over the video
+    ├── ExportCommand/Dialog # Trim, crop, rotate, sound; runs ffmpeg
     └── MainWindow, ControlBar, PlaylistPanel, StartPanel, ...
 ```
 
@@ -38,42 +41,51 @@ Viplyr/
 
 ## 2. Key Features
 
-### ✨ Advanced Playback
-- **Drag & Drop**: Seamlessly load files or entire directories.
-- **Asynchronous Loading**: Process thousands of files without freezing the UI.
-- **Playback Speed**: Adjust speed from **0.5x to 2.0x**.
-- **Subtitles**: Automatic detection and real-time sync for **.srt** files (Binary Search optimized).
-- **Hardware Decoding**: VAAPI and NVDEC/CUDA, with automatic fallback to the CPU.
-- **Frame-Accurate Seeking & Stepping**: Seek to an exact frame and step frame by frame.
+### ✨ Playback
+- **Drag & Drop**: Load files or entire folders; folders are scanned on a worker thread.
+- **Frame-Accurate Seeking & Stepping**: Seek to an exact frame, step frame by frame, jump to frame N.
+- **Playback Speed**: 0.5x to 2.0x without changing the pitch.
+- **Resume**: Each video continues where it was left.
+- **Audio Tracks & Subtitles**: Choose the audio track; subtitles from a `.srt` file next to the video or from a text track inside it.
+- **Formats**: Anything the system FFmpeg decodes. Interlaced video is deinterlaced, non-square pixels are shown at the right shape, 10-bit and HDR (PQ/HLG) video is tone-mapped for a normal screen.
+- **Network Streams**: Open `rtsp://`, `http://` and similar addresses.
 
-### 🖱️ Interactive UI
-- **Thumbnail Preview**: Hover over the seek bar to see video frames (cached; only the latest request is decoded).
-- **Jump-to-Click**: Instantly seek time or volume by clicking anywhere on the sliders.
-- **Playlist Search**: Real-time filtering for large video collections.
-- **Auto-hide Controls**: UI and cursor automatically hide during inactivity for immersive viewing.
-- **Playback Idle Inhibit**: Keeps the desktop session awake while video is playing.
+### 🖱️ Interface
+- **Overlay Controls**: The control bar floats over the video and fades away during playback, together with the cursor.
+- **Thumbnail Preview**: Hover over the seek bar to preview the video.
+- **Playlist**: Preview picture and length for each item, search, drag to reorder.
+- **On-Screen Messages**: Short confirmations for volume, speed, seeking and saved files.
+- **Zoom, Pan, Rotate, Always on Top**, and the desktop stays awake while a video plays.
 
-### 🖼️ Visuals & Transformations
-- **Zoom & Pan**: Mouse wheel to zoom, left-click drag to pan.
-- **Rotate**: 90-degree rotation support.
-- **Always on Top**: Toggle "Stay on Top" mode to multitask while watching.
+### ✂️ Edit & Export
+- **Trim**, **crop** (16:9, 9:16, 1:1, 4:3 or custom), **rotate**, **remove or replace the sound**.
+- Trimming and sound changes are exported without re-encoding (fast, no quality loss); crop, rotation and frame-exact cuts re-encode with a progress bar.
+- Export a range as a **PNG image sequence**, or save the current frame as an image.
+
+### 🤖 For Robotics & Computer Vision
+- **Overlays**: Draw boxes, points and labels over the video from a `<video name>.overlay.json` file (see [docs/integration.md](docs/integration.md)).
+- **Frame Information**: Frame number, exact timestamp, resolution, codec and decoder.
+- **Reusable Engine**: `viplyr_core` delivers frames to your own code; `decode_bench` measures decoding speed per decoder.
 
 ### ⌨️ Controls (Hotkeys)
 
 | Key | Action |
 | --- | --- |
 | `Space` | Play / Pause |
-| `F` | Toggle Fullscreen |
-| `M` | Mute / Unmute |
-| `T` | Toggle Always on Top |
-| `R` | Rotate Video 90° |
 | `Left` / `Right` | Seek backward / forward 5s |
 | `,` / `.` | Step one frame back / forward |
-| `Up` / `Down` | Increase / Decrease Volume |
-| `Esc` | Exit Fullscreen |
-| `Double Click` | Toggle Fullscreen |
-| `Mouse Wheel` | Zoom In / Out |
-| `Left Click Drag` | Pan Video (when zoomed) |
+| `Ctrl+G` | Go to frame number |
+| `Up` / `Down` | Volume |
+| `M` | Mute / Unmute |
+| `F` / `Double Click` / `Esc` | Fullscreen on, off |
+| `P` | Show / hide playlist |
+| `I` | Show / hide frame information |
+| `S` | Save the current frame as PNG |
+| `E` | Edit and export |
+| `R` | Rotate Video 90° |
+| `T` | Toggle Always on Top |
+| `Ctrl+O` / `Ctrl+U` | Add files / open a network URL |
+| `Mouse Wheel` / `Left Click Drag` | Zoom / pan when zoomed |
 
 ---
 
@@ -100,7 +112,7 @@ sudo apt install build-essential cmake ninja-build pkg-config \
 
 Qt 6.4 or newer and FFmpeg 6.1 or newer are required. `make test` runs the engine's headless tests.
 
-Set `VIPLYR_HWACCEL=none` (or `vaapi`, `cuda`) to override the automatic choice of decoder.
+The player decodes on the CPU by default: frames must reach system memory to be drawn, and reading 4K frames back from the GPU is slower than decoding them on the CPU (measure your machine with `build/core/decode_bench <video>`). Set `VIPLYR_HWACCEL=vaapi` or `cuda` to force a hardware decoder. Editing needs the `ffmpeg` program.
 
 ### Build & Install
 1. **Clone & Build**:

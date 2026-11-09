@@ -80,4 +80,13 @@ QString formatTime(qint64 milliseconds) {
     return QString("%1:%2").arg(minutes, 2, 10, zero).arg(seconds, 2, 10, zero);
 }
 
+QString formatTimePrecise(qint64 milliseconds) {
+    const QChar zero('0');
+    return QString("%1:%2:%3.%4")
+        .arg(milliseconds / 3600000, 2, 10, zero)
+        .arg((milliseconds / 60000) % 60, 2, 10, zero)
+        .arg((milliseconds / 1000) % 60, 2, 10, zero)
+        .arg(milliseconds % 1000, 3, 10, zero);
+}
+
 }  // namespace MediaFiles

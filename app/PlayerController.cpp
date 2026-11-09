@@ -1,5 +1,9 @@
 #include "PlayerController.h"
 
+#include <QCryptographicHash>
+#include <QFile>
+#include <QSettings>
+#include <QtConcurrent>
 #include <algorithm>
 
 namespace {
@@ -7,9 +11,13 @@ namespace {
 constexpr int kPositionIntervalMs = 40;
 // "Previous" restarts the current video when it has played longer than this.
 constexpr qint64 kRestartThresholdMs = 3000;
+// A position is only worth remembering away from the very start and the very end.
+constexpr qint64 kResumeMinimumMs = 5000;
+constexpr qint64 kResumeEndMarginMs = 10000;
 
-viplyr::OpenOptions openOptions() {
+viplyr::OpenOptions openOptions(int audioStreamIndex) {
     viplyr::OpenOptions options;
+    options.audioStreamIndex = audioStreamIndex;
     // VIPLYR_HWACCEL=none|vaapi|cuda overrides automatic selection, for troubleshooting.
     const QByteArray choice = qgetenv("VIPLYR_HWACCEL").toLower();
     if (choice == "none") options.hwAccel = viplyr::HwAccel::None;
@@ -23,6 +31,11 @@ std::vector<std::string> toStdStrings(const QStringList &list) {
     result.reserve(static_cast<size_t>(list.size()));
     for (const QString &item : list) result.push_back(item.toStdString());
     return result;
+}
+
+QString resumeKey(const QString &path) {
+    const QByteArray hash = QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1);
+    return "resume/" + QString::fromLatin1(hash.toHex());
 }
 
 }  // namespace
@@ -51,6 +64,9 @@ PlayerController::PlayerController(QObject *parent) : QObject(parent) {
 }
 
 PlayerController::~PlayerController() {
+    cancelSubtitleLoading();
+    waitForOpenTask();
+    rememberPosition();
     player_.close();
 }
 
@@ -79,12 +95,16 @@ void PlayerController::appendFiles(const QStringList &paths) {
 }
 
 void PlayerController::removeAt(int index) {
-    const bool wasPlaying = isPlaying();
+    const bool wasPlaying = isPlaying() || isOpening_;
     const bool removedCurrent = playlist_.removeAt(index);
     if (!removedCurrent) return;
 
     if (playlist_.count() > 0) openCurrent(wasPlaying);
     else closeMedia();
+}
+
+void PlayerController::moveItem(int from, int to) {
+    if (playlist_.move(from, to)) emit currentIndexChanged(playlist_.currentIndex());
 }
 
 void PlayerController::setCurrentIndex(int index) {
@@ -114,59 +134,191 @@ QString PlayerController::currentPath() const {
     return index < 0 ? QString() : QString::fromStdString(playlist_.at(index));
 }
 
-void PlayerController::openCurrent(bool startPlaying) {
-    const QString path = currentPath();
-    std::string error;
-    const bool opened = player_.open(path.toStdString(), openOptions(), &error);
+// ------------------------------------------------------------------ opening
 
-    subtitleText_.clear();
-    emit subtitleTextChanged(subtitleText_);
+void PlayerController::openCurrent(bool startPlaying, qint64 startPositionMs, int audioStreamIndex) {
+    rememberPosition();  // of the video that is about to be replaced
+    cancelSubtitleLoading();
+
+    pendingRequest_ = {currentPath(), startPlaying, startPositionMs, audioStreamIndex};
+    isOpening_ = true;
+    openPath_.clear();
+    setSubtitleText(QString());
     emit currentIndexChanged(playlist_.currentIndex());
-    emit durationChanged(duration());
 
-    if (!opened) {
+    // The engine is used by one thread at a time: a request that arrives while
+    // another is being opened waits, and replaces any request already waiting.
+    if (openTaskRunning_) hasQueuedRequest_ = true;
+    else startOpenTask();
+}
+
+void PlayerController::startOpenTask() {
+    const OpenRequest request = pendingRequest_;
+    openTaskRunning_ = true;
+    auto result = std::make_shared<OpenResult>();
+
+    const int generation = openGeneration_;
+
+    openTask_ = QtConcurrent::run([this, request, result] {
+        result->ok = player_.open(request.path.toStdString(), openOptions(request.audioStreamIndex),
+                                  &result->error);
+    });
+    // Runs on the GUI thread once the worker is done.
+    openTask_.then(this, [this, request, result, generation] {
+        if (generation != openGeneration_) return;  // closeMedia() already dealt with this task
+        openTaskRunning_ = false;
+        if (hasQueuedRequest_) {
+            hasQueuedRequest_ = false;
+            startOpenTask();
+            return;
+        }
+        isOpening_ = false;
+        finishOpen(request, *result);
+    });
+}
+
+void PlayerController::finishOpen(const OpenRequest &request, const OpenResult &result) {
+    if (!result.ok) {
         subtitles_.clear();
+        emit durationChanged(0);
         emit mediaClosed();
-        emit errorOccurred(QString::fromStdString(error));
+        emit errorOccurred(QString::fromStdString(result.error));
         return;
     }
-    subtitles_.loadForVideo(path);
-    emit mediaOpened(path, player_.info().rotationDegrees);
-    if (startPlaying) player_.play();
+
+    openPath_ = request.path;  // from here on hasMedia() is true
+    emit durationChanged(duration());
+    player_.setRate(rate_);
+    setSubtitleTrack(hasExternalSubtitles() ? kSubtitlesExternalFile : kSubtitlesOff);
+
+    qint64 startMs = request.startPositionMs;
+    const bool resuming = startMs < 0;
+    if (resuming) startMs = rememberedPosition(request.path);
+    if (startMs > 0) player_.seek(startMs / 1000.0);
+
+    emit mediaOpened(request.path);
+    if (resuming && startMs > 0) emit resumed(startMs);
+    if (request.startPlaying) player_.play();
+}
+
+void PlayerController::waitForOpenTask() {
+    hasQueuedRequest_ = false;
+    if (openTaskRunning_) openTask_.waitForFinished();
+    ++openGeneration_;  // its completion is still queued; make it do nothing
+    openTaskRunning_ = false;
+    isOpening_ = false;
 }
 
 void PlayerController::closeMedia() {
+    cancelSubtitleLoading();
+    waitForOpenTask();
+    rememberPosition();
     player_.close();
+    openPath_.clear();
     subtitles_.clear();
-    subtitleText_.clear();
-    emit subtitleTextChanged(subtitleText_);
+    setSubtitleText(QString());
     emit currentIndexChanged(playlist_.currentIndex());
     emit durationChanged(0);
     emit mediaClosed();
 }
 
 void PlayerController::handleEnded() {
-    // A newer video may have been opened since this was queued.
-    if (player_.state() != viplyr::State::Ended) return;
+    if (isOpening_ || player_.state() != viplyr::State::Ended) return;  // a newer video took over
+    QSettings().remove(resumeKey(openPath_));  // watched to the end: start over next time
     if (playlist_.next()) openCurrent(true);
+}
+
+// ----------------------------------------------------------- resume position
+
+void PlayerController::rememberPosition() {
+    if (!hasMedia()) return;
+    const qint64 current = position();
+    const qint64 total = duration();
+    QSettings settings;
+    if (current > kResumeMinimumMs && current < total - kResumeEndMarginMs) {
+        settings.setValue(resumeKey(openPath_), current);
+    } else {
+        settings.remove(resumeKey(openPath_));
+    }
+}
+
+qint64 PlayerController::rememberedPosition(const QString &path) const {
+    return QSettings().value(resumeKey(path), 0).toLongLong();
+}
+
+// ------------------------------------------------------------------- tracks
+
+void PlayerController::setAudioTrack(int streamIndex) {
+    if (!hasMedia() || streamIndex == player_.info().audioStreamIndex) return;
+    // The engine chooses its audio stream when it opens, so reopen at the same place.
+    const bool wasPlaying = isPlaying();
+    const qint64 current = position();
+    openCurrent(wasPlaying, std::max<qint64>(current, 1), streamIndex);
+}
+
+bool PlayerController::hasExternalSubtitles() const {
+    return hasMedia() && QFile::exists(SubtitleTrack::externalFileFor(openPath_));
+}
+
+void PlayerController::setSubtitleTrack(int track) {
+    if (!hasMedia()) return;
+    cancelSubtitleLoading();
+    subtitleTrack_ = track;
+    subtitles_.clear();
+    setSubtitleText(QString());
+
+    if (track == kSubtitlesOff) return;
+    if (track == kSubtitlesExternalFile) {
+        subtitles_.loadForVideo(openPath_);
+        return;
+    }
+
+    // An embedded track means scanning the whole file, so it runs on a worker thread.
+    const QString path = openPath_;
+    auto cancelled = std::make_shared<std::atomic<bool>>(false);
+    subtitleLoadCancelled_ = cancelled;
+    QtConcurrent::run([path, track, cancelled] {
+        return viplyr::readSubtitleTrack(path.toStdString(), track, cancelled.get());
+    }).then(this, [this, cancelled](const std::vector<viplyr::SubtitleCue> &cues) {
+        if (cancelled->load()) return;  // another track or video was chosen meanwhile
+        subtitles_.setCues(cues);
+    });
+}
+
+void PlayerController::cancelSubtitleLoading() {
+    if (subtitleLoadCancelled_) subtitleLoadCancelled_->store(true);
+    subtitleLoadCancelled_.reset();
+}
+
+void PlayerController::setSubtitleText(const QString &text) {
+    if (text == subtitleText_) return;
+    subtitleText_ = text;
+    emit subtitleTextChanged(text);
 }
 
 // ----------------------------------------------------------------- playback
 
-void PlayerController::play() { player_.play(); }
-void PlayerController::pause() { player_.pause(); }
+bool PlayerController::hasMedia() const { return !isOpening_ && !openPath_.isEmpty(); }
+bool PlayerController::isPlaying() const { return hasMedia() && player_.state() == viplyr::State::Playing; }
+viplyr::MediaInfo PlayerController::mediaInfo() const { return hasMedia() ? player_.info() : viplyr::MediaInfo(); }
+
+void PlayerController::play() { if (hasMedia()) player_.play(); }
+void PlayerController::pause() { if (hasMedia()) player_.pause(); }
 
 void PlayerController::togglePlayback() {
+    if (!hasMedia()) return;
     if (isPlaying()) player_.pause();
     else player_.play();
 }
 
 void PlayerController::stop() {
+    if (!hasMedia()) return;
     player_.pause();
     player_.seek(0.0);
 }
 
 void PlayerController::seekTo(qint64 milliseconds) {
+    if (!hasMedia()) return;
     player_.seek(milliseconds / 1000.0);
     refreshPosition();
 }
@@ -175,27 +327,32 @@ void PlayerController::seekRelative(qint64 milliseconds) {
     seekTo(std::clamp(position() + milliseconds, qint64(0), duration()));
 }
 
-void PlayerController::stepFrame(int direction) { player_.stepFrame(direction); }
+void PlayerController::stepFrame(int direction) { if (hasMedia()) player_.stepFrame(direction); }
+
+void PlayerController::goToFrame(qint64 frameNumber) {
+    if (!hasMedia() || player_.info().frameRate <= 0.0) return;
+    // Aim at the middle of the frame so rounding cannot land on its neighbour.
+    player_.seek((frameNumber + 0.5) / player_.info().frameRate);
+    refreshPosition();
+}
 
 void PlayerController::setVolume(int percent) {
     volume_ = std::clamp(percent, 0, 100);
     audioOutput_.setVolume(volume_ / 100.0);
 }
 
-void PlayerController::setPlaybackRate(qreal rate) { player_.setRate(rate); }
+void PlayerController::setPlaybackRate(qreal rate) {
+    rate_ = rate;
+    if (hasMedia()) player_.setRate(rate);
+}
 
-qint64 PlayerController::position() const { return qRound64(player_.position() * 1000.0); }
-qint64 PlayerController::duration() const { return qRound64(player_.duration() * 1000.0); }
+qint64 PlayerController::position() const { return hasMedia() ? qRound64(player_.position() * 1000.0) : 0; }
+qint64 PlayerController::duration() const { return hasMedia() ? qRound64(player_.duration() * 1000.0) : 0; }
 
 void PlayerController::refreshPosition() {
     const qint64 current = position();
     if (current == lastPosition_) return;
     lastPosition_ = current;
     emit positionChanged(current);
-
-    const QString text = subtitles_.textAt(current);
-    if (text != subtitleText_) {
-        subtitleText_ = text;
-        emit subtitleTextChanged(text);
-    }
+    setSubtitleText(subtitles_.textAt(current));
 }

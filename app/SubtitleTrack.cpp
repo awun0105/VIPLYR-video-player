@@ -18,10 +18,22 @@ qint64 parseTimestamp(const QString &text) {
 
 }  // namespace
 
+QString SubtitleTrack::externalFileFor(const QString &videoPath) {
+    const QFileInfo video(videoPath);
+    return video.path() + "/" + video.completeBaseName() + ".srt";
+}
+
+void SubtitleTrack::setCues(const std::vector<viplyr::SubtitleCue> &cues) {
+    cues_.clear();
+    for (const viplyr::SubtitleCue &cue : cues) {
+        cues_.append({qRound64(cue.start * 1000.0), qRound64(cue.end * 1000.0),
+                      QString::fromStdString(cue.text)});
+    }
+}
+
 void SubtitleTrack::loadForVideo(const QString &videoPath) {
     cues_.clear();
-    const QFileInfo video(videoPath);
-    QFile file(video.path() + "/" + video.completeBaseName() + ".srt");
+    QFile file(externalFileFor(videoPath));
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
 
     cues_ = parseSrt(QTextStream(&file).readAll());

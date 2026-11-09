@@ -1,6 +1,7 @@
 #include "VideoWidget.h"
 
 #include <QMouseEvent>
+#include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -10,7 +11,13 @@ namespace {
 constexpr double kMinZoom = 1.0;
 constexpr double kMaxZoom = 16.0;
 constexpr double kZoomStep = 1.15;
-constexpr int kSubtitleBottomMargin = 40;
+constexpr int kSubtitleBottomMargin = 24;
+constexpr int kLabelMargin = 14;
+constexpr int kMessageDurationMs = 1400;
+
+const char *kOverlayLabelStyle =
+    "color: white; font-size: 14px; font-weight: bold; background-color: rgba(0, 0, 0, 140); "
+    "border-radius: 6px; padding: 5px 10px;";
 
 const char *kVertexShader = R"(
     attribute vec2 position;
@@ -23,27 +30,83 @@ const char *kVertexShader = R"(
     }
 )";
 
-// Planar YUV 4:2:0 (three textures) or NV12 (luma + interleaved chroma) to RGB.
+// Planar YUV 4:2:0 (three textures) or semi-planar (luma + interleaved chroma) to RGB,
+// with tone mapping to the screen's range for HDR video.
 const char *kFragmentShader = R"(
     uniform sampler2D textureY;
-    uniform sampler2D textureU;   // U plane, or the UV plane for NV12
+    uniform sampler2D textureU;   // U plane, or the interleaved UV plane
     uniform sampler2D textureV;
-    uniform bool isNv12;
+    uniform bool semiPlanar;
+    uniform float sampleScale;    // stretches 10-bit samples stored in 16 bits to 0..1
     uniform vec3 yuvOffset;
     uniform mat3 yuvToRgb;
+    uniform int transfer;         // 0 = SDR, 1 = PQ (HDR10), 2 = HLG
     varying vec2 uv;
+
+    // BT.2020 primaries to the screen's BT.709 primaries.
+    const mat3 bt2020ToBt709 = mat3( 1.6605, -0.1246, -0.0182,
+                                    -0.5876,  1.1329, -0.1006,
+                                    -0.0728, -0.0083,  1.1187);
+
+    // PQ signal -> light, where 1.0 is SDR white (203 nits).
+    vec3 pqToLinear(vec3 signal) {
+        const float m1 = 0.1593017578125, m2 = 78.84375;
+        const float c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+        vec3 p = pow(clamp(signal, 0.0, 1.0), vec3(1.0 / m2));
+        vec3 nits = 10000.0 * pow(max(p - c1, 0.0) / (c2 - c3 * p), vec3(1.0 / m1));
+        return nits / 203.0;
+    }
+
+    // HLG signal -> light for a 1000-nit display, where 1.0 is SDR white.
+    vec3 hlgToLinear(vec3 signal) {
+        const float a = 0.17883277, b = 0.28466892, c = 0.55991073;
+        vec3 low = signal * signal / 3.0;
+        vec3 high = (exp((signal - c) / a) + b) / 12.0;
+        vec3 scene = mix(low, high, step(0.5, signal));
+        float luminance = dot(scene, vec3(0.2627, 0.6780, 0.0593));
+        return scene * pow(max(luminance, 1e-6), 0.2) * (1000.0 / 203.0);
+    }
+
+    // Filmic curve (Hable): compresses bright highlights instead of clipping them.
+    vec3 hable(vec3 x) {
+        const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
+        return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+    }
+
     void main() {
         vec3 yuv;
         yuv.x = texture2D(textureY, uv).r;
-        if (isNv12) {
-            yuv.yz = texture2D(textureU, uv).ra;
+        if (semiPlanar) {
+            yuv.yz = texture2D(textureU, uv).rg;
         } else {
             yuv.y = texture2D(textureU, uv).r;
             yuv.z = texture2D(textureV, uv).r;
         }
-        gl_FragColor = vec4(yuvToRgb * (yuv - yuvOffset), 1.0);
+        vec3 rgb = yuvToRgb * (yuv * sampleScale - yuvOffset);
+
+        if (transfer != 0) {
+            vec3 light = transfer == 1 ? pqToLinear(rgb) : hlgToLinear(rgb);
+            light = max(bt2020ToBt709 * light, 0.0);
+            const float whitePoint = 11.2;
+            light = hable(light * 2.0) / hable(vec3(whitePoint));
+            rgb = pow(clamp(light, 0.0, 1.0), vec3(1.0 / 2.2));
+        }
+        gl_FragColor = vec4(rgb, 1.0);
     }
 )";
+
+bool isDrawable(viplyr::PixelFormat format) {
+    return format == viplyr::PixelFormat::Yuv420p || format == viplyr::PixelFormat::Nv12 ||
+           format == viplyr::PixelFormat::Yuv420p10 || format == viplyr::PixelFormat::P010;
+}
+
+QLabel *createOverlayLabel(QWidget *parent) {
+    QLabel *label = new QLabel(parent);
+    label->setStyleSheet(kOverlayLabelStyle);
+    label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    label->hide();
+    return label;
+}
 
 }  // namespace
 
@@ -51,14 +114,18 @@ VideoWidget::VideoWidget(QWidget *parent) : QOpenGLWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
 
-    subtitleLabel_ = new QLabel(this);
+    subtitleLabel_ = createOverlayLabel(this);
     subtitleLabel_->setAlignment(Qt::AlignCenter);
-    subtitleLabel_->setWordWrap(true);
     subtitleLabel_->setStyleSheet("color: white; font-size: 22px; font-weight: bold; "
                                   "background-color: rgba(0, 0, 0, 150); border-radius: 5px; "
                                   "padding: 5px 15px;");
-    subtitleLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    subtitleLabel_->hide();
+    messageLabel_ = createOverlayLabel(this);
+    infoLabel_ = createOverlayLabel(this);
+    infoLabel_->setStyleSheet(QString(kOverlayLabelStyle) + "font-family: monospace; font-size: 12px;");
+
+    messageTimer_.setSingleShot(true);
+    messageTimer_.setInterval(kMessageDurationMs);
+    connect(&messageTimer_, &QTimer::timeout, messageLabel_, &QLabel::hide);
 }
 
 VideoWidget::~VideoWidget() {
@@ -71,11 +138,10 @@ VideoWidget::~VideoWidget() {
 // ------------------------------------------------------------ frame hand-over
 
 void VideoWidget::present(const viplyr::VideoFrame &frame) {
-    // The shader handles 8-bit 4:2:0 and NV12 directly; anything else is converted here,
-    // on the engine thread, so the GUI thread only ever uploads.
-    const viplyr::PixelFormat format = frame.format();
-    const bool drawable = format == viplyr::PixelFormat::Yuv420p || format == viplyr::PixelFormat::Nv12;
-    viplyr::VideoFrame ready = drawable ? frame : frame.convert(viplyr::PixelFormat::Yuv420p);
+    // Formats the shader cannot read are converted here, on the engine thread, so
+    // the GUI thread only ever uploads.
+    viplyr::VideoFrame ready = isDrawable(frame.format()) ? frame
+                                                          : frame.convert(viplyr::PixelFormat::Yuv420p);
     if (!ready.isValid()) return;
 
     {
@@ -93,8 +159,18 @@ void VideoWidget::clear() {
         std::lock_guard<std::mutex> lock(frameMutex_);
         pendingFrame_ = viplyr::VideoFrame();
     }
-    hasPicture_ = false;
+    shownFrame_ = viplyr::VideoFrame();
     update();
+}
+
+QImage VideoWidget::currentImage() const {
+    const viplyr::VideoFrame rgba = shownFrame_.convert(viplyr::PixelFormat::Rgba);
+    if (!rgba.isValid()) return QImage();
+    // copy(): the QImage must own its pixels once the converted frame is released.
+    const QImage image = QImage(rgba.plane(0), rgba.width(), rgba.height(), rgba.stride(0),
+                                QImage::Format_RGBA8888).copy();
+    const int rotation = rotationDegrees();
+    return rotation == 0 ? image : image.transformed(QTransform().rotate(rotation));
 }
 
 // ------------------------------------------------------------------ rendering
@@ -119,10 +195,10 @@ void VideoWidget::initializeGL() {
 
 void VideoWidget::paintGL() {
     updateQueued_ = false;
-    viplyr::VideoFrame frame;
+    viplyr::VideoFrame newFrame;
     {
         std::lock_guard<std::mutex> lock(frameMutex_);
-        frame = std::move(pendingFrame_);
+        newFrame = std::move(pendingFrame_);
         pendingFrame_ = viplyr::VideoFrame();
     }
 
@@ -130,8 +206,8 @@ void VideoWidget::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     program_.bind();
-    if (frame.isValid()) uploadFrame(frame);
-    if (!hasPicture_) {
+    if (newFrame.isValid()) uploadFrame(newFrame);
+    if (!shownFrame_.isValid()) {
         program_.release();
         return;
     }
@@ -144,7 +220,6 @@ void VideoWidget::paintGL() {
     program_.setUniformValue("textureY", 0);
     program_.setUniformValue("textureU", 1);
     program_.setUniformValue("textureV", 2);
-    program_.setUniformValue("isNv12", isNv12_);
     for (int i = 0; i < 3; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, textures_[i]);
@@ -158,6 +233,9 @@ void VideoWidget::paintGL() {
     program_.disableAttributeArray(0);
     program_.disableAttributeArray(1);
     program_.release();
+
+    drawOverlays();
+    if (newFrame.isValid()) emit frameShown(shownFrame_.pts());
 }
 
 void VideoWidget::uploadFrame(const viplyr::VideoFrame &frame) {
@@ -165,41 +243,54 @@ void VideoWidget::uploadFrame(const viplyr::VideoFrame &frame) {
     const int height = frame.height();
     const int chromaWidth = (width + 1) / 2;
     const int chromaHeight = (height + 1) / 2;
+    const viplyr::PixelFormat format = frame.format();
+    const bool semiPlanar = format == viplyr::PixelFormat::Nv12 || format == viplyr::PixelFormat::P010;
 
-    isNv12_ = frame.format() == viplyr::PixelFormat::Nv12;
-    uploadPlane(0, frame.plane(0), frame.stride(0), width, height, 1);
-    if (isNv12_) {
-        uploadPlane(1, frame.plane(1), frame.stride(1), chromaWidth, chromaHeight, 2);
+    uploadPlane(0, frame, 0, width, height, 1);
+    if (semiPlanar) {
+        uploadPlane(1, frame, 1, chromaWidth, chromaHeight, 2);
     } else {
-        uploadPlane(1, frame.plane(1), frame.stride(1), chromaWidth, chromaHeight, 1);
-        uploadPlane(2, frame.plane(2), frame.stride(2), chromaWidth, chromaHeight, 1);
+        uploadPlane(1, frame, 1, chromaWidth, chromaHeight, 1);
+        uploadPlane(2, frame, 2, chromaWidth, chromaHeight, 1);
     }
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
-    setColorConversion(frame);
+    program_.setUniformValue("semiPlanar", semiPlanar);
+    setColorUniforms(frame);
     frameWidth_ = width;
     frameHeight_ = height;
-    hasPicture_ = true;
+    shownFrame_ = frame;
 }
 
-void VideoWidget::uploadPlane(int textureIndex, const uint8_t *pixels, int stride, int width,
-                              int height, int bytesPerPixel) {
-    const GLenum format = bytesPerPixel == 1 ? GL_LUMINANCE : GL_LUMINANCE_ALPHA;
+void VideoWidget::uploadPlane(int textureIndex, const viplyr::VideoFrame &frame, int plane, int width,
+                              int height, int channels) {
+    const viplyr::PixelFormat pixelFormat = frame.format();
+    const bool sixteenBit = pixelFormat == viplyr::PixelFormat::Yuv420p10 ||
+                            pixelFormat == viplyr::PixelFormat::P010;
+    const int bytesPerSample = sixteenBit ? 2 : 1;
+
+    const GLenum format = channels == 1 ? GL_RED : GL_RG;
+    GLint internalFormat;
+    if (sixteenBit) internalFormat = channels == 1 ? GL_R16 : GL_RG16;
+    else internalFormat = channels == 1 ? GL_R8 : GL_RG8;
+
     glActiveTexture(GL_TEXTURE0 + textureIndex);
     glBindTexture(GL_TEXTURE_2D, textures_[textureIndex]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     // Rows are `stride` bytes apart, which may be more than the visible width.
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / bytesPerPixel);
-    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, pixels);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.stride(plane) / (bytesPerSample * channels));
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format,
+                 sixteenBit ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE, frame.plane(plane));
 }
 
-void VideoWidget::setColorConversion(const viplyr::VideoFrame &frame) {
-    // Luma weights of the two common standards.
-    const float kr = frame.isBt709() ? 0.2126f : 0.299f;
-    const float kb = frame.isBt709() ? 0.0722f : 0.114f;
+void VideoWidget::setColorUniforms(const viplyr::VideoFrame &frame) {
+    // Luma weights of the colour standards.
+    float kr = 0.299f, kb = 0.114f;                                      // BT.601
+    if (frame.isBt2020()) { kr = 0.2627f; kb = 0.0593f; }
+    else if (frame.isBt709()) { kr = 0.2126f; kb = 0.0722f; }
     const float kg = 1.0f - kr - kb;
 
-    // Limited range stores luma in 16..235 and chroma in 16..240.
+    // Limited range stores luma in 16..235 and chroma in 16..240 (of 255).
     const bool full = frame.isFullRange();
     const float lumaScale = full ? 1.0f : 255.0f / 219.0f;
     const float chromaScale = full ? 1.0f : 255.0f / 224.0f;
@@ -218,13 +309,25 @@ void VideoWidget::setColorConversion(const viplyr::VideoFrame &frame) {
     };
     program_.setUniformValue("yuvToRgb", QMatrix3x3(matrix));
     program_.setUniformValue("yuvOffset", QVector3D(lumaOffset, 0.5f, 0.5f));
+
+    // 10-bit samples sit in the low bits of a 16-bit texel (planar) or the high bits (P010).
+    const bool lowBits = frame.format() == viplyr::PixelFormat::Yuv420p10;
+    program_.setUniformValue("sampleScale", lowBits ? 65535.0f / 1023.0f : 1.0f);
+
+    int transfer = 0;
+    if (frame.transfer() == viplyr::TransferFunction::Pq) transfer = 1;
+    else if (frame.transfer() == viplyr::TransferFunction::Hlg) transfer = 2;
+    program_.setUniformValue("transfer", transfer);
 }
 
 QMatrix4x4 VideoWidget::viewTransform() const {
-    const int rotation = (mediaRotation_ + userRotation_) % 360;
+    const int rotation = rotationDegrees();
     const bool sideways = rotation % 180 != 0;
-    const double shownWidth = sideways ? frameHeight_ : frameWidth_;
-    const double shownHeight = sideways ? frameWidth_ : frameHeight_;
+    // Non-square pixels make the picture wider or narrower than its pixel count.
+    const double pictureWidth = frameWidth_ * pixelAspectRatio_;
+    const double pictureHeight = frameHeight_;
+    const double shownWidth = sideways ? pictureHeight : pictureWidth;
+    const double shownHeight = sideways ? pictureWidth : pictureHeight;
     const double fit = std::min(width() / shownWidth, height() / shownHeight);
 
     // Read bottom-up: size the unit quad to the picture, rotate it, scale it to
@@ -234,14 +337,77 @@ QMatrix4x4 VideoWidget::viewTransform() const {
     transform.scale(zoom_, zoom_);
     transform.scale(2.0 * fit / width(), 2.0 * fit / height());
     transform.rotate(-rotation, 0.0f, 0.0f, 1.0f);  // negative = clockwise on screen
-    transform.scale(frameWidth_ / 2.0, frameHeight_ / 2.0);
+    transform.scale(pictureWidth / 2.0, pictureHeight / 2.0);
     return transform;
+}
+
+// ------------------------------------------------------------------- overlays
+
+QPointF VideoWidget::videoToWidget(const QPointF &videoPixel) const {
+    const QPointF quad(2.0 * videoPixel.x() / frameWidth_ - 1.0, 1.0 - 2.0 * videoPixel.y() / frameHeight_);
+    const QPointF normalized = viewTransform().map(quad);
+    return QPointF((normalized.x() + 1.0) * width() / 2.0, (1.0 - normalized.y()) * height() / 2.0);
+}
+
+void VideoWidget::drawOverlays() {
+    const QVector<OverlayShape> shapes =
+        overlayTrack_ ? overlayTrack_->shapesAt(shownFrame_.pts()) : QVector<OverlayShape>();
+    if (shapes.isEmpty() && cropPreview_.isNull()) return;
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // A rectangle in the video becomes a (possibly rotated) polygon on screen.
+    const auto toPolygon = [this](const QRectF &rect) {
+        return QPolygonF({videoToWidget(rect.topLeft()), videoToWidget(rect.topRight()),
+                          videoToWidget(rect.bottomRight()), videoToWidget(rect.bottomLeft())});
+    };
+    const auto drawLabel = [&painter](const QPointF &anchor, const OverlayShape &shape) {
+        if (shape.label.isEmpty()) return;
+        const QRectF textBox = painter.fontMetrics().boundingRect(shape.label).adjusted(-4, -2, 4, 2);
+        const QRectF placed = textBox.translated(anchor - textBox.bottomLeft() - QPointF(0, 3));
+        painter.fillRect(placed, shape.color);
+        painter.setPen(Qt::black);
+        painter.drawText(placed, Qt::AlignCenter, shape.label);
+    };
+
+    for (const OverlayShape &shape : shapes) {
+        painter.setPen(QPen(shape.color, 2));
+        painter.setBrush(Qt::NoBrush);
+        if (shape.type == OverlayShape::Type::Box) {
+            const QPolygonF polygon = toPolygon(shape.box);
+            painter.drawPolygon(polygon);
+            drawLabel(polygon.boundingRect().topLeft(), shape);
+        } else {
+            const QPointF centre = videoToWidget(shape.point);
+            painter.setBrush(shape.color);
+            painter.drawEllipse(centre, 4, 4);
+            drawLabel(centre + QPointF(6, -4), shape);
+        }
+    }
+
+    if (!cropPreview_.isNull()) {
+        painter.setPen(QPen(QColor(255, 214, 0), 2, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPolygon(toPolygon(cropPreview_));
+    }
+}
+
+void VideoWidget::setOverlayTrack(const OverlayTrack *track) {
+    overlayTrack_ = track;
+    update();
+}
+
+void VideoWidget::setCropPreview(const QRectF &rect) {
+    cropPreview_ = rect;
+    update();
 }
 
 // ------------------------------------------------------------- view controls
 
-void VideoWidget::setMediaRotation(int degrees) {
-    mediaRotation_ = degrees;
+void VideoWidget::setMediaGeometry(int rotationDegrees, double pixelAspectRatio) {
+    mediaRotation_ = rotationDegrees;
+    pixelAspectRatio_ = pixelAspectRatio > 0.0 ? pixelAspectRatio : 1.0;
     userRotation_ = 0;
     resetView();
 }
@@ -293,16 +459,41 @@ void VideoWidget::mouseDoubleClickEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) emit fullscreenToggleRequested();
 }
 
-// ------------------------------------------------------------------ subtitles
+// --------------------------------------------------------------------- labels
 
 void VideoWidget::setSubtitleText(const QString &text) {
     subtitleLabel_->setText(text);
     subtitleLabel_->setVisible(!text.isEmpty());
-    layoutSubtitle();
+    layoutLabels();
 }
 
-void VideoWidget::layoutSubtitle() {
+void VideoWidget::setInfoText(const QString &text) {
+    infoLabel_->setText(text);
+    infoLabel_->setVisible(!text.isEmpty());
+    layoutLabels();
+}
+
+void VideoWidget::showMessage(const QString &text) {
+    messageLabel_->setText(text);
+    messageLabel_->adjustSize();
+    messageLabel_->move(kLabelMargin, kLabelMargin);
+    messageLabel_->show();
+    messageLabel_->raise();
+    messageTimer_.start();
+}
+
+void VideoWidget::setBottomInset(int pixels) {
+    bottomInset_ = pixels;
+    layoutLabels();
+}
+
+void VideoWidget::layoutLabels() {
+    if (!infoLabel_->isHidden()) {
+        infoLabel_->adjustSize();
+        infoLabel_->move(width() - infoLabel_->width() - kLabelMargin, kLabelMargin);
+    }
     if (subtitleLabel_->isHidden()) return;
+
     // One line when it fits; otherwise wrap inside 90% of the widget's width.
     const int maximumWidth = width() * 9 / 10;
     subtitleLabel_->setWordWrap(false);
@@ -315,10 +506,10 @@ void VideoWidget::layoutSubtitle() {
         subtitleLabel_->adjustSize();
     }
     subtitleLabel_->move((width() - subtitleLabel_->width()) / 2,
-                         height() - subtitleLabel_->height() - kSubtitleBottomMargin);
+                         height() - subtitleLabel_->height() - kSubtitleBottomMargin - bottomInset_);
 }
 
 void VideoWidget::resizeEvent(QResizeEvent *event) {
     QOpenGLWidget::resizeEvent(event);
-    layoutSubtitle();
+    layoutLabels();
 }

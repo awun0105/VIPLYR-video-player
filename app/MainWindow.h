@@ -1,13 +1,17 @@
 #pragma once
+#include <QPointer>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
 
 #include "IdleInhibitor.h"
+#include "OverlayTrack.h"
 
 class ControlBar;
+class ExportDialog;
 class PlayerController;
 class PlaylistPanel;
+class QPropertyAnimation;
 class QStackedWidget;
 class StartPanel;
 class ThumbnailPopup;
@@ -33,22 +37,41 @@ private:
     void buildLayout();
     void wireConnections();
     void createShortcuts();
+    void loadSettings();
+    void saveSettings();
 
+    // Opening media
     void addPaths(const QStringList &paths, bool replacePlaylist);
     void chooseFiles(bool replacePlaylist);
+    void chooseFolder();
+    void chooseUrl();
     void removeSelected();
     void refreshPlaylistPanel();
+    void onMediaOpened(const QString &path);
+    void onMediaClosed();
 
+    // Window and view
     void toggleFullscreen();
     void togglePlaylist();
     void toggleAlwaysOnTop();
+    void toggleInfo();
     void changeVolume(int delta);
+    void seekBy(qint64 milliseconds);
 
+    // Tools
+    void showTracksMenu();
+    void openExportDialog();
+    void saveSnapshot();
+    void askForFrame();
+    void updateInfo(double frameSeconds);
+
+    // Feedback
     void showThumbnail(int positionMs);
     void showError(const QString &message);
     void onPlayingChanged(bool playing);
 
-    // Auto-hide of the controls ("chrome") while a video plays.
+    // The control bar floats over the video and fades away while a video plays.
+    void layoutControlBar();
     void onUserActivity();
     void hideChromeIfIdle();
     void setChromeVisible(bool visible);
@@ -56,6 +79,7 @@ private:
     PlayerController *controller_;
     ThumbnailProvider *thumbnails_;
     IdleInhibitor idleInhibitor_;
+    OverlayTrack overlayTrack_;
 
     QStackedWidget *stack_;
     StartPanel *startPanel_;
@@ -64,10 +88,13 @@ private:
     ControlBar *controlBar_;
     PlaylistPanel *playlistPanel_;
     ThumbnailPopup *thumbnailPopup_;
+    QPointer<ExportDialog> exportDialog_;
+    QPropertyAnimation *chromeFade_;
 
     QTimer hideTimer_;
     bool playlistVisible_ = true;
     bool chromeVisible_ = true;
+    bool infoVisible_ = false;
     bool errorDialogOpen_ = false;
     qint64 wantedThumbnailMs_ = -1;
 };
