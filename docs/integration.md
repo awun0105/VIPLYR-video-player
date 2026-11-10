@@ -106,8 +106,15 @@ The Qt app uses both (`app/DmaBufImporter`, `app/CudaGlInterop`): the measured C
 
 - `MediaInfo::audioTracks` / `subtitleTracks` list what the file contains; play another audio
   track with `OpenOptions::audioStreamIndex`.
-- `readSubtitleTrack(url, streamIndex)` (`viplyr/SubtitleReader.h`) returns the cues of a text
-  subtitle track. It scans the whole file, so call it from a worker thread.
+- `readSubtitleTrack(url, streamIndex)` (`viplyr/SubtitleReader.h`) returns a whole subtitle
+  track. Each cue carries its plain text. ASS/SSA tracks also carry the raw event and the
+  track's `assHeader`, ready for libass. Bitmap tracks (DVD, Blu-ray PGS, DVB) carry palette
+  pictures placed on `canvasWidth` × `canvasHeight`. Pass `-1` as the index to read a
+  subtitle file (`.srt`, `.ass`, `.sup`). The function scans the whole file, so call it from a
+  worker thread.
+- `MediaInfo::chapters` lists chapters (start, end, title) on the same time line as the frames.
+- Audio is delivered with the channel count the `IAudioSink` asks for: 5.1 stays 5.1 on a
+  6-channel sink and is mixed down on a stereo one.
 - Interlaced video is deinterlaced automatically (on the CPU). `MediaInfo::pixelAspectRatio`
   tells you the shape of one pixel. 10-bit frames arrive as `Yuv420p10` or `P010`;
   `VideoFrame::transfer()` reports HDR (PQ/HLG). `convert()` to `Bgr24` does not tone-map.
