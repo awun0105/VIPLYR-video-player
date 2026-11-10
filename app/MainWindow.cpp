@@ -522,8 +522,9 @@ void MainWindow::openVideoEditor() {
         editor->videoWidget()->setMediaGeometry(info.rotationDegrees, info.pixelAspectRatio);
     });
     connect(editor, &EditorDialog::timelineChanged, preview, [editor, preview] {
-        preview->setTimeline(editor->playbackClips(), editor->position());
-        if (editor->playbackClips().isEmpty()) editor->videoWidget()->clear();
+        const auto clips = editor->playbackClips();
+        preview->setTimeline(clips, editor->position());
+        if (clips.isEmpty()) editor->videoWidget()->clear();
     });
     connect(editor, &EditorDialog::seekRequested, preview, [preview](qint64 ms) { preview->seekTimeline(ms); });
     connect(editor, &EditorDialog::playRequested, preview, &PlayerController::toggleTimeline);

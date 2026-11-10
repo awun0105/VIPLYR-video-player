@@ -65,7 +65,9 @@ EditorDialog::EditorDialog(QWidget *parent) : QDialog(parent) {
     import->setObjectName("editorImport");
     exportButton_ = new QPushButton("Export video…");
     exportButton_->setObjectName("editorExport");
-    exportButton_->setStyleSheet("background:#f8cf55; color:#211d10; font-weight:bold;");
+    exportButton_->setStyleSheet("QPushButton { background:#f8cf55; color:#211d10; font-weight:bold; }"
+                                 "QPushButton:hover { background:#ffdc6e; }"
+                                 "QPushButton:disabled { background:#4a4530; color:#8a8464; }");
     for (auto *button : {open, save, import, exportButton_}) header->addWidget(button);
     layout->addLayout(header);
 
@@ -117,6 +119,8 @@ EditorDialog::EditorDialog(QWidget *parent) : QDialog(parent) {
     inspector->addWidget(quick);
     auto *inspectorScroll = new QScrollArea;
     inspectorScroll->setWidget(inspectorPanel);
+    inspectorPanel->setAutoFillBackground(false);  // setWidget() turns this on: a light panel in a dark dialog
+    inspectorScroll->viewport()->setAutoFillBackground(false);
     inspectorScroll->setWidgetResizable(true);
     inspectorScroll->setFixedWidth(240);
     inspectorScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -162,11 +166,14 @@ EditorDialog::EditorDialog(QWidget *parent) : QDialog(parent) {
     progress_->setRange(0, 1000);
     progress_->setFixedWidth(130);
     progress_->hide();
-    auto *cancel = new QPushButton("Cancel export");
-    cancel->hide();
+    cancelButton_ = new QPushButton("Cancel export");
+    cancelButton_->hide();
     footer->addWidget(progress_);
-    footer->addWidget(cancel);
+    footer->addWidget(cancelButton_);
     layout->addLayout(footer);
+    // Keys go to the editor shortcuts, never to whichever button happened to be focused
+    // (Space on a focused "Delete clip" would otherwise delete the clip).
+    for (auto *button : findChildren<QPushButton *>()) button->setFocusPolicy(Qt::NoFocus);
 
     connect(import, &QPushButton::clicked, this, [this] {
         importPaths(QFileDialog::getOpenFileNames(this, "Import videos", {}, MediaFiles::fileDialogFilter()));
@@ -175,8 +182,7 @@ EditorDialog::EditorDialog(QWidget *parent) : QDialog(parent) {
     connect(save, &QPushButton::clicked, this, [this] { saveProject(); });
     connect(exportButton_, &QPushButton::clicked, this, &EditorDialog::exportVideo);
     connect(quick, &QPushButton::clicked, this, &EditorDialog::quickExportRequested);
-    connect(cancel, &QPushButton::clicked, this, &EditorDialog::cancelExportRequested);
-    connect(progress_, &QProgressBar::valueChanged, cancel, [this, cancel] { cancel->setVisible(exportRunning_); });
+    connect(cancelButton_, &QPushButton::clicked, this, &EditorDialog::cancelExportRequested);
     connect(play_, &QPushButton::clicked, this, &EditorDialog::playRequested);
     connect(undoButton_, &QPushButton::clicked, this, &EditorDialog::undo);
     connect(redoButton_, &QPushButton::clicked, this, &EditorDialog::redo);
@@ -283,7 +289,8 @@ void EditorDialog::setProgress(double fraction) { progress_->setValue(qRound(fra
 void EditorDialog::setExportRunning(bool running) {
     exportRunning_ = running;
     progress_->setVisible(running);
-    progress_->setValue(running ? 1 : 0);
+    cancelButton_->setVisible(running);
+    progress_->setValue(0);
     refresh(false);
 }
 

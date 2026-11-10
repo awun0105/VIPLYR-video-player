@@ -79,4 +79,5 @@ private:
     QPushButton *play_, *undoButton_, *redoButton_, *splitButton_, *deleteButton_, *duplicateButton_, *exportButton_;
     QComboBox *canvas_, *encoder_;
     QProgressBar *progress_;
+    QPushButton *cancelButton_;
 };

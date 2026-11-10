@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
@@ -36,8 +37,10 @@ void EditTimeline::setProject(const EditProject &project, int selected) {
 
 void EditTimeline::setPosition(qint64 positionMs) {
     if (positionMs_ == positionMs) return;
+    // Called 50 times a second during playback: repaint only where the playhead was and is.
+    const double before = xAt(positionMs_);
     positionMs_ = positionMs;
-    update();
+    for (double x : {before, xAt(positionMs_)}) update(QRect(qFloor(x) - 8, 0, 17, height()));
 }
 
 void EditTimeline::setZoom(double pixelsPerSecond) {
@@ -73,11 +76,12 @@ int EditTimeline::insertionAt(double x) const {
     return project_.clips.size();
 }
 
-void EditTimeline::paintEvent(QPaintEvent *) {
+void EditTimeline::paintEvent(QPaintEvent *event) {
     QPainter p(this);
-    p.fillRect(rect(), QColor("#121419"));
+    p.fillRect(event->rect(), QColor("#121419"));
     p.setRenderHint(QPainter::Antialiasing);
-    const QRect visible = visibleRegion().boundingRect();
+    const QRect viewport = visibleRegion().boundingRect();  // what the scroll area shows
+    const QRect visible = viewport.intersected(event->rect());  // what needs drawing now
     const double candidates[] = {0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600};
     double tick = 3600;
     for (double value : candidates) if (value * zoom_ >= 75) { tick = value; break; }
@@ -90,7 +94,7 @@ void EditTimeline::paintEvent(QPaintEvent *) {
     }
     if (project_.clips.isEmpty()) {
         p.setPen(QColor("#aab4c2"));
-        p.drawText(QRect(30, 60, visible.width() - 60, 90), Qt::AlignCenter,
+        p.drawText(QRect(30, 60, viewport.width() - 60, 90), Qt::AlignCenter,
                    "Drop videos here to start your edit");
     }
     for (int i = 0; i < project_.clips.size(); ++i) {
@@ -142,7 +146,7 @@ void EditTimeline::paintEvent(QPaintEvent *) {
         p.drawLine(QPointF(x, 51), QPointF(x, 168));
     }
     p.setPen(QColor("#7e8999"));
-    p.drawText(visible.adjusted(12, 184, -12, 0), Qt::AlignLeft | Qt::AlignTop,
+    p.drawText(viewport.adjusted(12, 184, -12, 0), Qt::AlignLeft | Qt::AlignTop,
                "Drag edges to trim  ·  Drag clips to reorder  ·  Drop a video between clips to insert");
 }
 
