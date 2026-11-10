@@ -17,13 +17,14 @@ namespace {
 constexpr int kMargin = 24;
 constexpr int kTrackTop = 58;
 constexpr int kTrackHeight = 100;
+constexpr int kHeight = kTrackTop + kTrackHeight + 14;
 constexpr const char *kClipMime = "application/x-viplyr-edit-clip";
 }
 
 EditTimeline::EditTimeline(QWidget *parent) : QWidget(parent) {
     setAcceptDrops(true);
     setMouseTracking(true);
-    setFixedHeight(210);
+    setFixedHeight(kHeight);
     setToolTip("Drag the yellow edges to trim. Drag a clip to reorder. Click the ruler to scrub. Ctrl+wheel to zoom.");
 }
 
@@ -51,7 +52,7 @@ void EditTimeline::setZoom(double pixelsPerSecond) {
 }
 
 QSize EditTimeline::sizeHint() const {
-    return QSize(std::max(600, qCeil(project_.duration() / 1000.0 * zoom_) + 2 * kMargin), 210);
+    return QSize(std::max(600, qCeil(project_.duration() / 1000.0 * zoom_) + 2 * kMargin), kHeight);
 }
 
 double EditTimeline::xAt(qint64 ms) const { return kMargin + ms / 1000.0 * zoom_; }
@@ -137,7 +138,7 @@ void EditTimeline::paintEvent(QPaintEvent *event) {
     }
     const double head = xAt(positionMs_);
     p.setPen(QPen(QColor("#f5f7fa"), 2));
-    p.drawLine(QPointF(head, 38), QPointF(head, 181));
+    p.drawLine(QPointF(head, 38), QPointF(head, kTrackTop + kTrackHeight + 8));
     p.setBrush(Qt::white);
     p.drawPolygon(QPolygonF{QPointF(head - 6, 31), QPointF(head + 6, 31), QPointF(head, 40)});
     if (dropBefore_ >= 0) {
@@ -145,9 +146,6 @@ void EditTimeline::paintEvent(QPaintEvent *event) {
         const double x = xAt(project_.startOf(dropBefore_));
         p.drawLine(QPointF(x, 51), QPointF(x, 168));
     }
-    p.setPen(QColor("#7e8999"));
-    p.drawText(viewport.adjusted(12, 184, -12, 0), Qt::AlignLeft | Qt::AlignTop,
-               "Drag edges to trim  ·  Drag clips to reorder  ·  Drop a video between clips to insert");
 }
 
 void EditTimeline::mousePressEvent(QMouseEvent *event) {

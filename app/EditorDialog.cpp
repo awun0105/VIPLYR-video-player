@@ -153,7 +153,7 @@ EditorDialog::EditorDialog(QWidget *parent) : QDialog(parent) {
     scroll_->setWidgetResizable(true);
     scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-    scroll_->setFixedHeight(232);
+    scroll_->setFixedHeight(194);
     layout->addWidget(scroll_);
 
     auto *footer = new QHBoxLayout;
@@ -380,8 +380,9 @@ void EditorDialog::exportVideo() {
     ExportOptions options;
     options.inputPath = project_.clips.first().path;
     options.outputPath = output;
+    // One clip on its own canvas needs no scaling or padding: a plain frame-accurate cut.
     options.outputSize = canvas_->currentData().toSize();
-    if (!options.outputSize.isValid()) options.outputSize = project_.clips.first().pictureSize;
+    if (!options.outputSize.isValid() && project_.clips.size() > 1) options.outputSize = project_.clips.first().pictureSize;
     options.outputFrameRate = std::clamp(project_.clips.first().frameRate, 1.0, 60.0);
     options.frameAccurateCut = true;
     options.encoder = static_cast<ExportOptions::Encoder>(encoder_->currentData().toInt());
