@@ -89,6 +89,19 @@ Set `OpenOptions::keepHwFrames = true` to leave frames on the GPU: `frame.isHard
 then true, `frame.native()` gives the underlying `AVFrame` (VAAPI surface or CUDA frame) for
 zero-copy consumers, and `frame.download()` returns a CPU copy when one is needed.
 
+Two helpers hand GPU frames on without a copy:
+
+- `frame.exportDmaBuf()` (VAAPI): the luma and chroma planes as DMA-BUF file descriptors with
+  DRM format, modifier, offset and pitch, ready for `EGL_EXT_image_dma_buf_import`, Vulkan or
+  another device. Keep the returned `DmaBufImage` alive while the planes are in use.
+- `frame.cudaPlanes()` (CUDA): device pointers and pitches of the planes. CUDA decoding uses the
+  device's primary context, so code in the same process (TensorRT, a CUDA kernel, an OpenGL
+  interop) can read them directly; retain it with `cuDevicePrimaryCtxRetain(0)` after setting
+  `CU_CTX_SCHED_BLOCKING_SYNC`.
+
+The Qt app uses both (`app/DmaBufImporter`, `app/CudaGlInterop`): the measured CPU load for a
+4K 60 fps clip falls from about 100% (H.264) / 250% (HEVC 10-bit) of a core to 8–15%.
+
 ## Tracks, subtitles and special formats
 
 - `MediaInfo::audioTracks` / `subtitleTracks` list what the file contains; play another audio

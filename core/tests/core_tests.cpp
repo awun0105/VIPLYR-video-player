@@ -359,6 +359,34 @@ void testTracksAndFormats(const std::string &clip) {
 
 }  // namespace
 
+// GPU frames handed on without copying: DMA-BUF planes from VAAPI, device
+// planes from CUDA. Skipped for a decoder this machine does not have.
+void testGpuFrameExport(const std::string &clip, HwAccel hwAccel, const char *label) {
+    OpenOptions options;
+    options.hwAccel = hwAccel;
+    options.keepHwFrames = true;
+    FrameReader reader;
+    std::string error;
+    VideoFrame frame;
+    if (!reader.open(clip, options, &error) || !reader.read(frame) || !frame.isHardware()) {
+        std::printf("  gpu export (%s): no such decoder, skipped\n", label);
+        return;
+    }
+    if (hwAccel == HwAccel::Vaapi) {
+        const DmaBufImage image = frame.exportDmaBuf();
+        CHECK(image.isValid() && image.planeCount == 2 && image.format == PixelFormat::Nv12);
+        CHECK(image.planes[0].fd >= 0 && image.planes[0].width == 320 && image.planes[1].height == 120);
+        CHECK(!frame.cudaPlanes().isValid());
+    } else {
+        const CudaImage image = frame.cudaPlanes();
+        CHECK(image.isValid() && image.format == PixelFormat::Nv12);
+        CHECK(image.planes[0] != 0 && image.pitch[0] >= 320 && image.width[1] == 160);
+        CHECK(!frame.exportDmaBuf().isValid());
+    }
+    CHECK(!frame.download().exportDmaBuf().isValid());  // CPU frames have nothing to share
+    std::printf("  gpu export (%s): ok\n", label);
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
         std::fprintf(stderr, "usage: %s <test_clip.mp4> <test_tracks.mkv>\n", argv[0]);
@@ -369,6 +397,8 @@ int main(int argc, char **argv) {
     testPlaylist();
     testFrameReader(clip, HwAccel::None, "cpu");
     testFrameReader(clip, HwAccel::Vaapi, "vaapi if available");
+    testGpuFrameExport(clip, HwAccel::Vaapi, "vaapi");
+    testGpuFrameExport(clip, HwAccel::Cuda, "cuda");
     testPlayer(clip, true);
     testPlayer(clip, false);
     testTracksAndFormats(argv[2]);

@@ -10,7 +10,10 @@
 #include <atomic>
 #include <mutex>
 
+#include "CudaGlInterop.h"
+#include "DmaBufImporter.h"
 #include "OverlayTrack.h"
+#include "viplyr/MediaInfo.h"
 #include "viplyr/Sinks.h"
 
 // Shows video frames with OpenGL and supports zoom, pan and rotation.
@@ -29,6 +32,11 @@ public:
 
     // The picture currently shown, with rotation applied; null when there is none.
     QImage currentImage() const;
+    // The GPU decoder whose frames this screen shows without copying them to the
+    // CPU (Vaapi through DMA-BUF, Cuda through CUDA/OpenGL interop), or None.
+    // Checks with a throwaway OpenGL context, so it works before any widget is shown.
+    static viplyr::HwAccel probeGpuFramePath();
+    bool isShowingGpuFrame() const { return shownOnGpu_; }  // drawn straight from the decoder
     double currentFrameTime() const { return shownFrame_.isValid() ? shownFrame_.pts() : 0.0; }
 
     // Shapes drawn over the video. The track must outlive the widget or be reset to null.
@@ -49,6 +57,7 @@ public slots:
 signals:
     void fullscreenToggleRequested();
     void frameShown(double seconds);          // a new frame is on screen
+    void gpuFramePathChanged(viplyr::HwAccel decoder);  // None after a failed import
 
 protected:
     void initializeGL() override;
@@ -61,9 +70,11 @@ protected:
 
 private:
     void uploadFrame(const viplyr::VideoFrame &frame);
+    bool bindHardwareFrame(const viplyr::VideoFrame &frame);
     void uploadPlane(int textureIndex, const viplyr::VideoFrame &frame, int plane, int width,
                      int height, int channels);
-    void setColorUniforms(const viplyr::VideoFrame &frame);
+    void setColorUniforms(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage);
+    void showFrame(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage, bool onGpu);
     void drawOverlays();
 
     int rotationDegrees() const { return (mediaRotation_ + userRotation_) % 360; }
@@ -78,7 +89,12 @@ private:
     std::atomic<bool> updateQueued_{false};
 
     QOpenGLShaderProgram program_;
-    GLuint textures_[3] = {0, 0, 0};
+    GLuint textures_[3] = {0, 0, 0};      // filled by uploads from CPU memory
+    GLuint gpuTextures_[2] = {0, 0};      // views of a GPU frame (luma, chroma)
+    bool shownOnGpu_ = false;
+    DmaBufImporter dmaBuf_;
+    CudaGlInterop cuda_;
+    std::atomic<bool> acceptsGpuFrames_{false};
     viplyr::VideoFrame shownFrame_;  // kept for snapshots and overlay timing
     int frameWidth_ = 0;
     int frameHeight_ = 0;

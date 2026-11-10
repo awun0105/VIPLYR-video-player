@@ -107,12 +107,12 @@ To use the engine in another project, build with `-DVIPLYR_BUILD_APP=OFF` and li
 sudo apt update
 sudo apt install build-essential cmake ninja-build pkg-config \
                  qt6-base-dev qt6-multimedia-dev \
-                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev
+                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libegl-dev
 ```
 
 Qt 6.4 or newer and FFmpeg 6.1 or newer are required. `make test` runs the engine's headless tests.
 
-The player decodes on the CPU by default: frames must reach system memory to be drawn, and reading 4K frames back from the GPU is slower than decoding them on the CPU (measure your machine with `build/core/decode_bench <video>`). Set `VIPLYR_HWACCEL=vaapi` or `cuda` to force a hardware decoder. Editing needs the `ffmpeg` program.
+When the screen can take GPU frames directly, the player decodes on the GPU and draws each frame without copying it through system memory: VAAPI frames are imported as DMA-BUF through EGL (Intel/AMD), NVDEC frames are copied GPU-to-GPU through CUDA/OpenGL interop (when OpenGL runs on the NVIDIA GPU). 4K 60 fps then takes about 10–15% of one CPU core instead of 1–2.5 cores. Otherwise it decodes on the CPU, which beats decoding on the GPU and reading the frames back. The start-up line `Viplyr: GPU frames shown without a CPU copy: ...` tells which path is in use. `VIPLYR_HWACCEL=none|vaapi|cuda` forces a decoder (frames then go through system memory). Editing needs the `ffmpeg` program.
 
 ### Build & Install
 1. **Clone & Build**:

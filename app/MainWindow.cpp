@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -170,6 +171,13 @@ void MainWindow::wireConnections() {
     // Video area
     connect(videoWidget_, &VideoWidget::fullscreenToggleRequested, this, &MainWindow::toggleFullscreen);
     connect(videoWidget_, &VideoWidget::frameShown, this, &MainWindow::updateInfo);
+    connect(videoWidget_, &VideoWidget::gpuFramePathChanged, controller_, &PlayerController::setGpuFramePath);
+    const viplyr::HwAccel gpuPath = VideoWidget::probeGpuFramePath();
+    qInfo("Viplyr: GPU frames shown without a CPU copy: %s",
+          gpuPath == viplyr::HwAccel::Vaapi ? "VAAPI (DMA-BUF)"
+          : gpuPath == viplyr::HwAccel::Cuda ? "NVDEC (CUDA/OpenGL)"
+                                             : "no, decoding on the CPU");
+    controller_->setGpuFramePath(gpuPath);
 
     // Seek-bar preview
     JumpSlider *seekSlider = controlBar_->seekSlider();
@@ -456,7 +464,8 @@ void MainWindow::updateInfo(double frameSeconds) {
     if (!infoVisible_) return;
     const viplyr::MediaInfo info = controller_->mediaInfo();
     if (!info.hasVideo) return;
-    const QString decoder = info.hardwareDecoder.empty() ? "cpu" : QString::fromStdString(info.hardwareDecoder);
+    QString decoder = info.hardwareDecoder.empty() ? "cpu" : QString::fromStdString(info.hardwareDecoder);
+    if (videoWidget_->isShowingGpuFrame()) decoder += ", zero-copy";
     videoWidget_->setInfoText(QString("frame %1   %2   %3x%4   %5 fps   %6 (%7)")
                                   .arg(qRound64(frameSeconds * info.frameRate))
                                   .arg(MediaFiles::formatTimePrecise(qRound64(frameSeconds * 1000.0)))

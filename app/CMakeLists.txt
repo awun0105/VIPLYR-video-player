@@ -5,6 +5,8 @@ add_executable(Viplyr
     main.cpp
     AudioOutput.cpp
     ControlBar.cpp
+    CudaGlInterop.cpp
+    DmaBufImporter.cpp
     ExportCommand.cpp
     ExportDialog.cpp
     Icons.cpp
@@ -24,7 +26,7 @@ add_executable(Viplyr
 )
 target_link_libraries(Viplyr PRIVATE
     viplyr_core
-    Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::DBus)
+    Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::DBus ${CMAKE_DL_LIBS})
 target_compile_options(Viplyr PRIVATE -Wall -Wextra)
 # Keep the binary at build/Viplyr, where the Makefile and the desktop entry expect it.
 set_target_properties(Viplyr PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

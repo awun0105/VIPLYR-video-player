@@ -41,8 +41,14 @@ bool attachHardware(AVCodecContext *context, const AVCodec *codec, AVHWDeviceTyp
     const AVPixelFormat hwFormat = hwFormatFor(codec, type);
     if (hwFormat == AV_PIX_FMT_NONE) return false;
 
+    // CUDA uses the device's primary context, so other code in the process
+    // (an OpenGL interop, an inference engine) can use the frames directly.
+    AVDictionary *deviceOptions = nullptr;
+    if (type == AV_HWDEVICE_TYPE_CUDA) av_dict_set(&deviceOptions, "primary_ctx", "1", 0);
     AVBufferRef *device = nullptr;
-    if (av_hwdevice_ctx_create(&device, type, nullptr, nullptr, 0) < 0) return false;
+    const int created = av_hwdevice_ctx_create(&device, type, nullptr, deviceOptions, 0);
+    av_dict_free(&deviceOptions);
+    if (created < 0) return false;
 
     context->hw_device_ctx = device;  // the context now owns the reference
     context->opaque = reinterpret_cast<void *>(static_cast<intptr_t>(hwFormat));

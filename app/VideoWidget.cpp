@@ -1,6 +1,8 @@
 #include "VideoWidget.h"
 
 #include <QMouseEvent>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
 #include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
@@ -130,7 +132,10 @@ VideoWidget::VideoWidget(QWidget *parent) : QOpenGLWidget(parent) {
 
 VideoWidget::~VideoWidget() {
     makeCurrent();
+    dmaBuf_.release();
+    cuda_.release();
     glDeleteTextures(3, textures_);
+    glDeleteTextures(2, gpuTextures_);
     program_.removeAllShaders();
     doneCurrent();
 }
@@ -138,10 +143,11 @@ VideoWidget::~VideoWidget() {
 // ------------------------------------------------------------ frame hand-over
 
 void VideoWidget::present(const viplyr::VideoFrame &frame) {
-    // Formats the shader cannot read are converted here, on the engine thread, so
-    // the GUI thread only ever uploads.
-    viplyr::VideoFrame ready = isDrawable(frame.format()) ? frame
-                                                          : frame.convert(viplyr::PixelFormat::Yuv420p);
+    // GPU frames go straight to the screen when the context can import them.
+    // Anything else the shader cannot read is converted here, on the engine
+    // thread, so the GUI thread only ever uploads.
+    const bool passThrough = isDrawable(frame.format()) || (frame.isHardware() && acceptsGpuFrames_);
+    viplyr::VideoFrame ready = passThrough ? frame : frame.convert(viplyr::PixelFormat::Yuv420p);
     if (!ready.isValid()) return;
 
     {
@@ -184,13 +190,36 @@ void VideoWidget::initializeGL() {
     program_.link();
 
     glGenTextures(3, textures_);
-    for (GLuint texture : textures_) {
+    glGenTextures(2, gpuTextures_);
+    for (GLuint texture : {textures_[0], textures_[1], textures_[2], gpuTextures_[0], gpuTextures_[1]}) {
         glBindTexture(GL_TEXTURE_2D, texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
+
+    viplyr::HwAccel path = viplyr::HwAccel::None;
+    // CUDA first: it only accepts an OpenGL context on the NVIDIA GPU, where NVDEC
+    // decodes; any other GPU takes VAAPI frames.
+    if (cuda_.initialize()) path = viplyr::HwAccel::Cuda;
+    else if (dmaBuf_.initialize()) path = viplyr::HwAccel::Vaapi;
+    acceptsGpuFrames_ = path != viplyr::HwAccel::None;
+    emit gpuFramePathChanged(path);
+}
+
+viplyr::HwAccel VideoWidget::probeGpuFramePath() {
+    QOpenGLContext context;
+    QOffscreenSurface surface;
+    surface.create();
+    if (!context.create() || !context.makeCurrent(&surface)) return viplyr::HwAccel::None;
+    viplyr::HwAccel path = viplyr::HwAccel::None;
+    DmaBufImporter dmaBuf;
+    CudaGlInterop cuda;
+    if (cuda.initialize()) path = viplyr::HwAccel::Cuda;
+    else if (dmaBuf.initialize()) path = viplyr::HwAccel::Vaapi;
+    context.doneCurrent();
+    return path;
 }
 
 void VideoWidget::paintGL() {
@@ -206,7 +235,14 @@ void VideoWidget::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     program_.bind();
-    if (newFrame.isValid()) uploadFrame(newFrame);
+    if (newFrame.isHardware() && !bindHardwareFrame(newFrame)) {
+        // The import failed (another GPU, an unusual surface): copy this frame and
+        // ask for CPU frames from now on.
+        acceptsGpuFrames_ = false;
+        emit gpuFramePathChanged(viplyr::HwAccel::None);
+        newFrame = newFrame.download();
+    }
+    if (newFrame.isValid() && !newFrame.isHardware()) uploadFrame(newFrame);
     if (!shownFrame_.isValid()) {
         program_.release();
         return;
@@ -222,7 +258,7 @@ void VideoWidget::paintGL() {
     program_.setUniformValue("textureV", 2);
     for (int i = 0; i < 3; ++i) {
         glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, textures_[i]);
+        glBindTexture(GL_TEXTURE_2D, shownOnGpu_ && i < 2 ? gpuTextures_[i] : textures_[i]);
     }
 
     program_.enableAttributeArray(0);
@@ -254,11 +290,33 @@ void VideoWidget::uploadFrame(const viplyr::VideoFrame &frame) {
         uploadPlane(2, frame, 2, chromaWidth, chromaHeight, 1);
     }
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    showFrame(frame, format, false);
+}
 
+bool VideoWidget::bindHardwareFrame(const viplyr::VideoFrame &frame) {
+    if (cuda_.isAvailable()) {
+        const viplyr::CudaImage image = frame.cudaPlanes();
+        if (!image.isValid() || !cuda_.copy(image, gpuTextures_)) return false;
+        showFrame(frame, image.format, true);
+        return true;
+    }
+    if (dmaBuf_.isAvailable()) {
+        const viplyr::DmaBufImage image = frame.exportDmaBuf();
+        if (!image.isValid() || !dmaBuf_.bind(image, gpuTextures_)) return false;
+        showFrame(frame, image.format, true);
+        return true;
+    }
+    return false;
+}
+
+void VideoWidget::showFrame(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage, bool onGpu) {
+    const bool semiPlanar = storage == viplyr::PixelFormat::Nv12 || storage == viplyr::PixelFormat::P010;
     program_.setUniformValue("semiPlanar", semiPlanar);
-    setColorUniforms(frame);
-    frameWidth_ = width;
-    frameHeight_ = height;
+    setColorUniforms(frame, storage);
+    if (!onGpu) dmaBuf_.release();  // the GPU frame is no longer drawn
+    shownOnGpu_ = onGpu;
+    frameWidth_ = frame.width();
+    frameHeight_ = frame.height();
     shownFrame_ = frame;
 }
 
@@ -283,7 +341,7 @@ void VideoWidget::uploadPlane(int textureIndex, const viplyr::VideoFrame &frame,
                  sixteenBit ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE, frame.plane(plane));
 }
 
-void VideoWidget::setColorUniforms(const viplyr::VideoFrame &frame) {
+void VideoWidget::setColorUniforms(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage) {
     // Luma weights of the colour standards.
     float kr = 0.299f, kb = 0.114f;                                      // BT.601
     if (frame.isBt2020()) { kr = 0.2627f; kb = 0.0593f; }
@@ -311,7 +369,7 @@ void VideoWidget::setColorUniforms(const viplyr::VideoFrame &frame) {
     program_.setUniformValue("yuvOffset", QVector3D(lumaOffset, 0.5f, 0.5f));
 
     // 10-bit samples sit in the low bits of a 16-bit texel (planar) or the high bits (P010).
-    const bool lowBits = frame.format() == viplyr::PixelFormat::Yuv420p10;
+    const bool lowBits = storage == viplyr::PixelFormat::Yuv420p10;
     program_.setUniformValue("sampleScale", lowBits ? 65535.0f / 1023.0f : 1.0f);
 
     int transfer = 0;

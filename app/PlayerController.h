@@ -64,6 +64,8 @@ public slots:
     void setPlaybackRate(qreal rate);
     void setCurrentIndex(int index);
     void setAudioTrack(int streamIndex);
+    // The GPU decoder whose frames the screen shows directly (None: decode on the CPU).
+    void setGpuFramePath(viplyr::HwAccel decoder);
     void setSubtitleTrack(int track);  // kSubtitlesOff, kSubtitlesExternalFile or a stream index
 
 signals:
@@ -123,5 +125,6 @@ private:
     std::shared_ptr<std::atomic<bool>> subtitleLoadCancelled_;
     qint64 lastPosition_ = -1;
     int volume_ = 100;
+    viplyr::HwAccel gpuFramePath_ = viplyr::HwAccel::None;
     qreal rate_ = 1.0;
 };

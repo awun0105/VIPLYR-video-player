@@ -15,14 +15,20 @@ constexpr qint64 kRestartThresholdMs = 3000;
 constexpr qint64 kResumeMinimumMs = 5000;
 constexpr qint64 kResumeEndMarginMs = 10000;
 
-viplyr::OpenOptions openOptions(int audioStreamIndex) {
+viplyr::OpenOptions openOptions(int audioStreamIndex, viplyr::HwAccel gpuFramePath) {
     viplyr::OpenOptions options;
     options.audioStreamIndex = audioStreamIndex;
-    // VIPLYR_HWACCEL=none|vaapi|cuda overrides automatic selection, for troubleshooting.
+    // VIPLYR_HWACCEL=none|vaapi|cuda overrides automatic selection, for troubleshooting;
+    // those frames are copied to the CPU.
     const QByteArray choice = qgetenv("VIPLYR_HWACCEL").toLower();
     if (choice == "none") options.hwAccel = viplyr::HwAccel::None;
     else if (choice == "vaapi") options.hwAccel = viplyr::HwAccel::Vaapi;
     else if (choice == "cuda") options.hwAccel = viplyr::HwAccel::Cuda;
+    else if (gpuFramePath != viplyr::HwAccel::None) {
+        // Decoding on the GPU only pays off when frames stay there until shown.
+        options.hwAccel = gpuFramePath;
+        options.keepHwFrames = true;
+    }
     return options;
 }
 
@@ -158,10 +164,10 @@ void PlayerController::startOpenTask() {
     auto result = std::make_shared<OpenResult>();
 
     const int generation = openGeneration_;
+    const viplyr::OpenOptions options = openOptions(request.audioStreamIndex, gpuFramePath_);
 
-    openTask_ = QtConcurrent::run([this, request, result] {
-        result->ok = player_.open(request.path.toStdString(), openOptions(request.audioStreamIndex),
-                                  &result->error);
+    openTask_ = QtConcurrent::run([this, request, result, options] {
+        result->ok = player_.open(request.path.toStdString(), options, &result->error);
     });
     // Runs on the GUI thread once the worker is done.
     openTask_.then(this, [this, request, result, generation] {
@@ -247,6 +253,17 @@ qint64 PlayerController::rememberedPosition(const QString &path) const {
 }
 
 // ------------------------------------------------------------------- tracks
+
+void PlayerController::setGpuFramePath(viplyr::HwAccel decoder) {
+    if (decoder == gpuFramePath_) return;
+    gpuFramePath_ = decoder;
+    if (decoder != viplyr::HwAccel::None) return;
+    qWarning("Viplyr: the screen could not take a GPU frame; decoding on the CPU");
+    // A file already playing on the GPU path that the screen cannot take is reopened on the CPU.
+    if (hasMedia() && !player_.info().hardwareDecoder.empty()) {
+        openCurrent(isPlaying(), std::max<qint64>(position(), 1), player_.info().audioStreamIndex);
+    }
+}
 
 void PlayerController::setAudioTrack(int streamIndex) {
     if (!hasMedia() || streamIndex == player_.info().audioStreamIndex) return;
