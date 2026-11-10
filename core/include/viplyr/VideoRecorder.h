@@ -35,6 +35,7 @@ public:
     bool start(const std::string &path, const RecorderOptions &options = {}, std::string *error = nullptr);
     // Encodes what is queued and finishes the file. False when recording failed.
     bool stop(std::string *error = nullptr);
+    // False after an asynchronous failure; call stop() to collect its error.
     bool isRecording() const;
 
     int64_t framesWritten() const;

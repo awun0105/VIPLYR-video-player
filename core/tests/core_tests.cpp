@@ -566,6 +566,31 @@ void testGpuFrameExport(const std::string &clip, HwAccel hwAccel, const char *la
     std::printf("  gpu export (%s): ok\n", label);
 }
 
+// Encoder failures must stop producers waiting for progress, while stop() still
+// joins the worker and reports the asynchronous error.
+void testRecorderFailure(const std::string &clip) {
+    std::printf("recorder failure\n");
+    FrameReader reader;
+    CHECK(reader.open(clip));
+    VideoFrame frame;
+    CHECK(reader.read(frame));
+    VideoRecorder recorder;
+    RecorderOptions options;
+    options.encoder = "no_such_encoder";
+    CHECK(recorder.start("recorder_failure_test.mp4", options));
+    recorder.present(frame);
+    CHECK(waitFor([&] { return !recorder.isRecording(); }));
+    std::string error;
+    CHECK(!recorder.stop(&error));
+    CHECK(error.find("No usable video encoder") != std::string::npos);
+    CHECK(!recorder.isRecording());
+    CHECK(recorder.stop());  // already joined
+    CHECK(recorder.start("recorder_failure_test.mp4"));
+    CHECK(recorder.isRecording());
+    CHECK(recorder.stop());  // a fresh recording with no frames
+    std::remove("recorder_failure_test.mp4");
+}
+
 // Records every frame of the clip with each encoder, then reads the file back.
 void testRecorder(const std::string &clip, const std::string &encoder) {
     const std::string path = "recorder_test_" + encoder + ".mp4";
@@ -582,9 +607,12 @@ void testRecorder(const std::string &clip, const std::string &encoder) {
     while (reader.read(frame)) {
         recorder.present(frame);
         // Like a real-time source: do not outrun the encoder's queue.
-        while (recorder.isRecording() && recorder.framesWritten() + 16 < static_cast<int64_t>(frame.pts() * 30)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        const bool progressed = waitFor([&] {
+            return !recorder.isRecording() ||
+                   recorder.framesWritten() + 16 >= static_cast<int64_t>(frame.pts() * 30);
+        });
+        CHECK(progressed);
+        if (!progressed || !recorder.isRecording()) break;
     }
     std::string error;
     const bool finished = recorder.stop(&error);
@@ -654,6 +682,7 @@ int main(int argc, char **argv) {
     testGpuFrameExport(clip, HwAccel::Vaapi, "vaapi");
     testGpuFrameExport(clip, HwAccel::Cuda, "cuda");
     std::printf("recorder\n");
+    testRecorderFailure(clip);
     testRecorder(clip, "libx264");
     testRecorder(clip, "h264_nvenc");
     testLiveSource();

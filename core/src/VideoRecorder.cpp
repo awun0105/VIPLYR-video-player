@@ -71,7 +71,7 @@ public:
     void present(const VideoFrame &frame) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!recording_ || finishing_) return;
+            if (!recording_ || finishing_ || !failure_.empty()) return;
             if (static_cast<int>(queue_.size()) >= options_.queueCapacity) {
                 ++droppedFrames_;
                 return;
@@ -83,7 +83,9 @@ public:
 
     bool isRecording() const {
         std::lock_guard<std::mutex> lock(mutex_);
-        return recording_;
+        // Keep recording_ set until stop() joins the worker, but tell producers
+        // to stop waiting for progress as soon as the encoder fails.
+        return recording_ && failure_.empty();
     }
 
     std::atomic<int64_t> framesWritten_{0};

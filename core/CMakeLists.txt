@@ -61,5 +61,6 @@ if(VIPLYR_BUILD_TESTS)
         target_link_libraries(core_tests PRIVATE viplyr_core Threads::Threads PkgConfig::FFMPEG)
         add_test(NAME core_tests COMMAND core_tests ${TEST_CLIP} ${TEST_TRACKS_CLIP}
                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_styled.ass)
+        set_tests_properties(core_tests PROPERTIES TIMEOUT 120)
     endif()
 endif()
