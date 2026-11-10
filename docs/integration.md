@@ -128,34 +128,92 @@ stays on screen until the next entry's time:
 
 Press `I` in the player for the frame number and exact timestamp of the frame on screen.
 
-## ROS 2
+## Cameras and live streams
 
-There is no ROS code in this repository yet. A publisher is an `IVideoSink` that lives in
-your ROS package:
+`OpenOptions::inputFormat` opens a device: `"v4l2"` for cameras (chosen automatically for
+`/dev/video*`), `"x11grab"` for the screen, `"lavfi"` for FFmpeg test sources. Device settings
+go in `formatOptions`, e.g. `{"video_size", "1280x720"}, {"framerate", "30"},
+{"input_format", "mjpeg"}`.
+
+`OpenOptions::lowLatency = true` is for live sources. It turns off input buffering and
+frame-threaded decoding, which holds several frames back, and the player shows each frame as
+soon as it is decoded. When frames queue up, it skips to the newest. `position()` follows the
+newest frame shown.
+
+## Recording
+
+`viplyr::VideoRecorder` is an `IVideoSink` that encodes what it receives into a file (.mp4,
+.mkv, ...). Encoding runs on its own thread, so `present()` never holds up playback. When
+the encoder falls behind, frames are dropped and counted (`droppedFrames()`), instead of
+slowing the player down. `encoder = "auto"` uses NVENC when there is one, and libx264
+otherwise.
 
 ```cpp
-class ImagePublisherSink : public viplyr::IVideoSink {
-public:
-    explicit ImagePublisherSink(rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher)
-        : publisher_(std::move(publisher)) {}
-
-    void present(const viplyr::VideoFrame &frame) override {
-        const viplyr::VideoFrame bgr = frame.convert(viplyr::PixelFormat::Bgr24);
-        sensor_msgs::msg::Image message;
-        message.height = bgr.height();
-        message.width = bgr.width();
-        message.encoding = "bgr8";
-        message.step = bgr.stride(0);
-        message.data.assign(bgr.plane(0), bgr.plane(0) + bgr.stride(0) * bgr.height());
-        publisher_->publish(message);
-    }
-
-private:
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
-};
+viplyr::VideoRecorder recorder;
+player.addVideoSink(&recorder);
+recorder.start("run_042.mp4");      // records from the next frame on
+...
+std::string error;
+if (!recorder.stop(&error)) std::cerr << error << '\n';
 ```
 
-This sketch has not been compiled or run; treat it as a starting point.
+## Python
+
+`python/` builds a `viplyr` module with pybind11. You need `pybind11-dev` and `python3-dev`,
+and the build output is `build/python/viplyr.*.so`. Images reach NumPy without a copy: each
+array keeps its frame alive.
+
+```python
+import viplyr
+
+for image, pts in viplyr.FrameReader("video.mp4"):       # image: (H, W, 3) uint8 BGR
+    ...
+
+reader = viplyr.FrameReader("video.mp4", hw="cuda", keep_gpu=True)
+frame = reader.read_frame()
+luma = cupy.asarray(frame.luma)                          # or torch.as_tensor(frame.luma, device="cuda")
+chroma = cupy.asarray(frame.chroma)                      # (H/2, W/2, 2) interleaved U, V
+
+player = viplyr.Player()
+player.on_frame = lambda frame: detector(frame.to_numpy("rgb"))   # called on an engine thread
+player.open("/dev/video0", low_latency=True, format_options={"video_size": "1280x720"})
+player.start_recording("session.mp4")
+player.play()
+```
+
+`frame.luma` and `frame.chroma` expose `__cuda_array_interface__`, so PyTorch, CuPy and
+Numba read the decoder's GPU memory in place. CUDA decoding uses the device's primary
+context, which is the context PyTorch uses. `viplyr.set_log_level("info")` brings back
+FFmpeg's messages; the module sets them to `"warning"` on import.
+
+## ROS 2
+
+`ros2/viplyr_ros` is an ament package with one node, `video_publisher`. It publishes a file,
+stream or camera as `sensor_msgs/Image` (`image_raw`) plus `CameraInfo` (`camera_info`, size
+only). Put the repository, or a link to it, in your workspace's `src` and build with colcon.
+The package builds `core/` itself, so it needs only the FFmpeg development packages
+(`libav*-dev`, including `libavdevice-dev`).
+
+```bash
+ros2 launch viplyr_ros video_publisher.launch.py url:=/data/run.mp4 hw:=auto
+ros2 run viplyr_ros video_publisher --ros-args -p url:=/dev/video0 -p low_latency:=true \
+    -p format_options:="['video_size=1280x720','framerate=30']"
+ros2 service call /viplyr_video_publisher/set_playing std_srvs/srv/SetBool "{data: false}"
+ros2 topic pub --once /viplyr_video_publisher/seek std_msgs/msg/Float64 "{data: 12.5}"
+ros2 service call /viplyr_video_publisher/set_recording std_srvs/srv/SetBool "{data: true}"  # needs record_path
+```
+
+The parameters are listed at the top of `src/video_publisher.cpp`. Images are converted and
+published on a thread of their own, so a slow subscriber cannot slow down playback. When
+publishing falls behind, the node warns every 10 s with the number of frames it skipped.
+
+Large images between processes: with the default DDS over UDP, best-effort images of
+640×360 and larger sometimes lose frames on the way. This was measured in the `ros:jazzy`
+container with a Python subscriber, while the node itself published every frame. For full
+rate, run the node as a component (`viplyr_ros::VideoPublisher`) in the same container as
+its subscribers with intra-process communication on. Otherwise, use a shared-memory DDS
+transport, or `reliable:=true`. `test/check_publisher.py` and `test/check_live.sh` are the
+checks that were run against it.
 
 ## Threading rules
 

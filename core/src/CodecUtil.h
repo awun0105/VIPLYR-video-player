@@ -37,8 +37,9 @@ AVFormatContext *openInput(const std::string &url, const OpenOptions &options, s
 
 // Opens a decoder for `stream`, using hardware decoding when `hwAccel` allows it
 // and it is available. `hardwareName` receives "vaapi"/"cuda" or stays empty.
+// `lowDelay` trades decoding throughput for latency (see OpenOptions::lowLatency).
 AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string *hardwareName,
-                            std::string *error);
+                            std::string *error, bool lowDelay = false);
 
 // Resolves HwAccel::Auto for a video stream (see HwAccel::Auto).
 HwAccel effectiveHwAccel(const OpenOptions &options);

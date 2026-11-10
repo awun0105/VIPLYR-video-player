@@ -24,6 +24,7 @@ AVPixelFormat toAvFormat(PixelFormat format) {
         case PixelFormat::P010:    return AV_PIX_FMT_P010LE;
         case PixelFormat::Bgr24:   return AV_PIX_FMT_BGR24;
         case PixelFormat::Rgba:    return AV_PIX_FMT_RGBA;
+        case PixelFormat::Gray8:   return AV_PIX_FMT_GRAY8;
         default:                   return AV_PIX_FMT_NONE;
     }
 }
@@ -52,6 +53,7 @@ PixelFormat VideoFrame::format() const {
         case AV_PIX_FMT_P010LE:   return PixelFormat::P010;
         case AV_PIX_FMT_BGR24:    return PixelFormat::Bgr24;
         case AV_PIX_FMT_RGBA:     return PixelFormat::Rgba;
+        case AV_PIX_FMT_GRAY8:    return PixelFormat::Gray8;
         default:                  return PixelFormat::Unknown;
     }
 }

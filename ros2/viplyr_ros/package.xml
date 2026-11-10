@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>viplyr_ros</name>
+  <version>0.1.0</version>
+  <description>Publishes video files and streams as sensor_msgs/Image using the Viplyr engine (FFmpeg, CPU/GPU decoding).</description>
+  <maintainer email="hoang25662@gmail.com">Lâm Quang Anh Quân</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>pkg-config</build_depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>ffmpeg</depend>
+  <test_depend>rclpy</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

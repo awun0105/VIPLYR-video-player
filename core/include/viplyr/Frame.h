@@ -14,6 +14,7 @@ enum class PixelFormat {
     P010,      // 2 planes of 16-bit samples, value in the high 10 bits
     Bgr24,     // 1 plane, matches cv::Mat CV_8UC3
     Rgba,      // 1 plane
+    Gray8,     // 1 plane of full-range luminance, matches cv::Mat CV_8UC1
     Hardware,  // pixels live on the GPU; use download() to read them
 };
 

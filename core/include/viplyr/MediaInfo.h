@@ -22,8 +22,16 @@ struct OpenOptions {
     bool keepHwFrames = false;
     // Stream index of the audio track to play (see MediaInfo::audioTracks); -1 picks the default.
     int audioStreamIndex = -1;
-    // Passed to libavformat, e.g. {"rtsp_transport", "tcp"} or {"fflags", "nobuffer"}.
+    // Passed to libavformat, e.g. {"rtsp_transport", "tcp"}, or to a device, e.g.
+    // {"video_size", "1280x720"}, {"framerate", "30"}, {"input_format", "mjpeg"} for v4l2.
     std::map<std::string, std::string> formatOptions;
+    // A libavdevice/libavformat input such as "v4l2" (cameras), "x11grab" or "lavfi".
+    // Empty guesses from the url; "/dev/video*" is opened as "v4l2".
+    std::string inputFormat;
+    // For live sources (cameras, RTSP): no input buffering, no frame-threaded decoding
+    // (it holds several frames back), and every frame is shown as soon as it is decoded,
+    // skipping to the newest one when several are waiting.
+    bool lowLatency = false;
 };
 
 // One audio or subtitle track inside the file.

@@ -15,7 +15,7 @@ Install prerequisites on Debian/Ubuntu with:
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config qt6-base-dev qt6-multimedia-dev \
-  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libegl-dev
+  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libegl-dev pybind11-dev python3-dev
 ```
 
 ## Architecture & Logic

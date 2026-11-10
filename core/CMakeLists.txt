@@ -1,6 +1,6 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-    libavformat libavcodec libavutil libswscale libavfilter)
+    libavformat libavcodec libavutil libswscale libavfilter libavdevice)
 find_package(Threads REQUIRED)
 
 add_library(viplyr_core STATIC
@@ -9,9 +9,11 @@ add_library(viplyr_core STATIC
     src/Deinterlacer.cpp
     src/Frame.cpp
     src/FrameReader.cpp
+    src/Logging.cpp
     src/Player.cpp
     src/Playlist.cpp
     src/SubtitleReader.cpp
+    src/VideoRecorder.cpp
 )
 target_include_directories(viplyr_core PUBLIC include)
 target_link_libraries(viplyr_core PRIVATE PkgConfig::FFMPEG Threads::Threads)

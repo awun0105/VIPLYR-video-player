@@ -13,6 +13,7 @@
 #include "viplyr/Player.h"
 #include "viplyr/Playlist.h"
 #include "viplyr/SubtitleReader.h"
+#include "viplyr/VideoRecorder.h"
 
 using namespace viplyr;
 
@@ -62,6 +63,10 @@ struct RecordingVideoSink : IVideoSink {
     double lastPts() {
         std::lock_guard<std::mutex> lock(mutex);
         return entries.empty() ? -1.0 : entries.back().pts;
+    }
+    int count() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return static_cast<int>(entries.size());
     }
 
     std::mutex mutex;
@@ -392,6 +397,81 @@ void testGpuFrameExport(const std::string &clip, HwAccel hwAccel, const char *la
     std::printf("  gpu export (%s): ok\n", label);
 }
 
+// Records every frame of the clip with each encoder, then reads the file back.
+void testRecorder(const std::string &clip, const std::string &encoder) {
+    const std::string path = "recorder_test_" + encoder + ".mp4";
+    VideoRecorder recorder;
+    RecorderOptions options;
+    options.encoder = encoder;
+    options.width = 160;
+    options.height = 120;
+    CHECK(recorder.start(path, options));
+
+    FrameReader reader;
+    CHECK(reader.open(clip));
+    VideoFrame frame;
+    while (reader.read(frame)) {
+        recorder.present(frame);
+        // Like a real-time source: do not outrun the encoder's queue.
+        while (recorder.isRecording() && recorder.framesWritten() + 16 < static_cast<int64_t>(frame.pts() * 30)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    std::string error;
+    const bool finished = recorder.stop(&error);
+    if (!finished && encoder != "libx264") {  // optional encoders may be missing on this machine
+        std::printf("  recorder (%s): %s, skipped\n", encoder.c_str(), error.c_str());
+        return;
+    }
+    CHECK(finished);
+    std::printf("  recorder (%s): %lld frames with %s, %lld dropped\n", encoder.c_str(),
+                static_cast<long long>(recorder.framesWritten()), recorder.encoderName().c_str(),
+                static_cast<long long>(recorder.droppedFrames()));
+    CHECK(recorder.framesWritten() + recorder.droppedFrames() == 90);
+
+    FrameReader check;
+    CHECK(check.open(path));
+    CHECK(check.info().width == 160 && check.info().height == 120);
+    CHECK(near(check.info().duration, 3.0, 0.1));
+    int count = 0;
+    double lastPts = -1.0;
+    bool increasing = true;
+    while (check.read(frame)) {
+        increasing = increasing && frame.pts() > lastPts;
+        lastPts = frame.pts();
+        ++count;
+    }
+    CHECK(count == recorder.framesWritten() && increasing);
+    std::remove(path.c_str());
+}
+
+// A live device in low-latency mode: FFmpeg's lavfi test source, paced like a camera.
+void testLiveSource() {
+    std::printf("live source (lavfi device, low latency)\n");
+    Player player;
+    RecordingVideoSink video;
+    player.addVideoSink(&video);
+    OpenOptions options;
+    options.inputFormat = "lavfi";
+    options.lowLatency = true;
+    std::string error;
+    CHECK(player.open("testsrc2=size=320x240:rate=30,realtime", options, &error));
+    if (!error.empty()) std::printf("  %s\n", error.c_str());
+    CHECK(player.info().width == 320 && player.info().frameRate > 29.0);
+    player.play();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    const int frames = video.count();
+    std::printf("  %d frames in 1 s\n", frames);
+    CHECK(frames >= 25 && frames <= 33);
+    // The position follows the newest frame shown.
+    CHECK(std::fabs(player.position() - video.lastPts()) < 0.1);
+    player.close();
+
+    OpenOptions bad;
+    bad.inputFormat = "no_such_device";
+    CHECK(!player.open("x", bad, &error) && error.find("Unknown input format") != std::string::npos);
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
         std::fprintf(stderr, "usage: %s <test_clip.mp4> <test_tracks.mkv>\n", argv[0]);
@@ -404,6 +484,10 @@ int main(int argc, char **argv) {
     testFrameReader(clip, HwAccel::Vaapi, "vaapi if available");
     testGpuFrameExport(clip, HwAccel::Vaapi, "vaapi");
     testGpuFrameExport(clip, HwAccel::Cuda, "cuda");
+    std::printf("recorder\n");
+    testRecorder(clip, "libx264");
+    testRecorder(clip, "h264_nvenc");
+    testLiveSource();
     testPlayer(clip, true);
     testPlayer(clip, false);
     testTracksAndFormats(argv[2]);

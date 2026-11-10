@@ -110,6 +110,7 @@ private:
     const AVStream *videoStream_ = nullptr;
     const AVStream *audioStream_ = nullptr;
     bool keepHwFrames_ = false;
+    bool lowLatency_ = false;
     bool deinterlace_ = false;
     double startOffset_ = 0.0;
 
@@ -161,7 +162,8 @@ bool Player::Impl::open(const std::string &url, const OpenOptions &options, std:
     std::string hardwareName;
     if (videoIndex >= 0) {
         videoStream_ = format_->streams[videoIndex];
-        videoDecoder_ = openDecoder(videoStream_, effectiveHwAccel(options), &hardwareName, error);
+        videoDecoder_ = openDecoder(videoStream_, effectiveHwAccel(options), &hardwareName, error,
+                                    options.lowLatency);
         if (!videoDecoder_) {
             close();
             return false;
@@ -183,6 +185,7 @@ bool Player::Impl::open(const std::string &url, const OpenOptions &options, std:
     }
 
     keepHwFrames_ = options.keepHwFrames;
+    lowLatency_ = options.lowLatency;
     startOffset_ = startOffsetSeconds(format_, videoStream_);
     info_ = describeMedia(format_, videoStream_, audioStream_, hardwareName);
 
@@ -572,6 +575,12 @@ void Player::Impl::presentLoop() {
                     continue;
                 }
                 isStep = true;
+            } else if (lowLatency_) {
+                // Live: show at once, but never fall behind.
+                if (videoFrames_.size() > 0) {
+                    pending.reset();
+                    continue;
+                }
             } else {
                 const double delay = (pts - clock_.now()) / rate_;
                 if (delay > 0.001) {
@@ -594,6 +603,7 @@ void Player::Impl::presentLoop() {
             // With no audio to drive it, the clock restarts from the frame actually shown.
             if (!hasAudio()) clock_.set(pts);
         }
+        if (lowLatency_ && !hasAudio()) clock_.set(pts);  // position follows the source
         if (isStep) {
             --stepRequests_;
             clock_.set(pts);

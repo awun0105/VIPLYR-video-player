@@ -47,7 +47,7 @@ bool FrameReader::Impl::open(const std::string &url, const OpenOptions &options,
     stream_ = format_->streams[index];
 
     std::string hardwareName;
-    decoder_ = openDecoder(stream_, effectiveHwAccel(options), &hardwareName, error);
+    decoder_ = openDecoder(stream_, effectiveHwAccel(options), &hardwareName, error, options.lowLatency);
     if (!decoder_) {
         close();
         return false;

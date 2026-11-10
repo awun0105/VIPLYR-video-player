@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VIPLYR_BUILD_APP "Build the Qt6 desktop player" ON)
 option(VIPLYR_BUILD_TESTS "Build the core tests and examples" ON)
+option(VIPLYR_BUILD_PYTHON "Build the Python module (needs pybind11)" ON)
 
 if(VIPLYR_BUILD_TESTS)
     enable_testing()
@@ -21,4 +22,8 @@ add_subdirectory(core)
 
 if(VIPLYR_BUILD_APP)
     add_subdirectory(app)
+endif()
+
+if(VIPLYR_BUILD_PYTHON)
+    add_subdirectory(python)
 endif()

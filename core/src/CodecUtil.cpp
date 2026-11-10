@@ -1,8 +1,10 @@
 #include "CodecUtil.h"
 
 #include <cmath>
+#include <mutex>
 
 extern "C" {
+#include <libavdevice/avdevice.h>
 #include <libavutil/display.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixdesc.h>
@@ -107,9 +109,27 @@ AVFormatContext *openInput(const std::string &url, const OpenOptions &options, s
     for (const auto &option : options.formatOptions) {
         av_dict_set(&dictionary, option.first.c_str(), option.second.c_str(), 0);
     }
+    if (options.lowLatency) {  // the caller's own values win
+        av_dict_set(&dictionary, "fflags", "nobuffer", AV_DICT_DONT_OVERWRITE);
+        av_dict_set(&dictionary, "flags", "low_delay", AV_DICT_DONT_OVERWRITE);
+    }
+
+    std::string inputName = options.inputFormat;
+    if (inputName.empty() && url.rfind("/dev/video", 0) == 0) inputName = "v4l2";
+    const AVInputFormat *inputFormat = nullptr;
+    if (!inputName.empty()) {
+        static std::once_flag devicesRegistered;
+        std::call_once(devicesRegistered, [] { avdevice_register_all(); });
+        inputFormat = av_find_input_format(inputName.c_str());
+        if (!inputFormat) {
+            if (error) *error = "Unknown input format " + inputName;
+            av_dict_free(&dictionary);
+            return nullptr;
+        }
+    }
 
     AVFormatContext *format = nullptr;
-    int result = avformat_open_input(&format, url.c_str(), nullptr, &dictionary);
+    int result = avformat_open_input(&format, url.c_str(), inputFormat, &dictionary);
     av_dict_free(&dictionary);
     if (result >= 0) result = avformat_find_stream_info(format, nullptr);
     if (result < 0) {
@@ -121,7 +141,7 @@ AVFormatContext *openInput(const std::string &url, const OpenOptions &options, s
 }
 
 AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string *hardwareName,
-                            std::string *error) {
+                            std::string *error, bool lowDelay) {
     const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) {
         if (error) *error = std::string("No decoder for ") + avcodec_get_name(stream->codecpar->codec_id);
@@ -139,8 +159,10 @@ AVCodecContext *openDecoder(const AVStream *stream, HwAccel hwAccel, std::string
     if (allowHardware) hardware = tryHardware(context, codec, hwAccel);
     if (hardware.empty()) {
         context->thread_count = 0;  // let FFmpeg use every CPU core
-        context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        // Frame threading decodes several frames at once and so holds output back.
+        context->thread_type = lowDelay ? FF_THREAD_SLICE : FF_THREAD_FRAME | FF_THREAD_SLICE;
     }
+    if (lowDelay) context->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
     const int result = avcodec_open2(context, codec, nullptr);
     if (result < 0) {

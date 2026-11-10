@@ -21,14 +21,20 @@ Viplyr/
 │   │   ├── Sinks.h          # IVideoSink / IAudioSink extension points
 │   │   ├── MediaInfo.h      # MediaInfo, OpenOptions, HwAccel, tracks
 │   │   ├── SubtitleReader.h # Read a text subtitle track from a file
+│   │   ├── VideoRecorder.h  # Encode frames to a file on its own thread
+│   │   ├── Logging.h        # FFmpeg log level
 │   │   └── Playlist.h
 │   ├── src/                 # Pipeline threads, clock, queues, FFmpeg helpers
 │   ├── tests/               # Headless tests (ctest)
 │   └── examples/            # frame_dump (frame as BGR image), decode_bench (decoder speed)
 │
+├── python/                  # `import viplyr`: pybind11 module and its tests
+├── ros2/viplyr_ros/         # ROS 2 package: video_publisher node / component
+│
 └── app/                     # The Qt6 desktop player, a thin layer over the core
     ├── PlayerController     # Playback model the UI talks to
     ├── VideoWidget          # OpenGL video output (zoom, pan, rotate, subtitles)
+    ├── DmaBufImporter, CudaGlInterop  # GPU frames to OpenGL textures without a copy
     ├── AudioOutput          # Audio device output
     ├── ThumbnailProvider    # Seek-bar previews on a worker thread
     ├── SubtitleTrack        # .srt and embedded subtitle lookup
@@ -66,6 +72,10 @@ Viplyr/
 - **Overlays**: Draw boxes, points and labels over the video from a `<video name>.overlay.json` file (see [docs/integration.md](docs/integration.md)).
 - **Frame Information**: Frame number, exact timestamp, resolution, codec and decoder.
 - **Reusable Engine**: `viplyr_core` delivers frames to your own code; `decode_bench` measures decoding speed per decoder.
+- **Cameras and Live Streams**: V4L2 cameras, screen capture and RTSP with a low-latency mode.
+- **Recording**: `VideoRecorder` encodes any frame stream to a file (NVENC or libx264) without slowing playback.
+- **Python**: `import viplyr` gives frames as NumPy arrays without a copy, and CUDA frames to PyTorch/CuPy in place.
+- **ROS 2**: the `viplyr_ros` node publishes files, streams and cameras as `sensor_msgs/Image`, with play, pause, seek and record control.
 
 ### ⌨️ Controls (Hotkeys)
 
@@ -107,7 +117,8 @@ To use the engine in another project, build with `-DVIPLYR_BUILD_APP=OFF` and li
 sudo apt update
 sudo apt install build-essential cmake ninja-build pkg-config \
                  qt6-base-dev qt6-multimedia-dev \
-                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libegl-dev
+                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libegl-dev
+# optional, for `import viplyr`: pybind11-dev python3-dev
 ```
 
 Qt 6.4 or newer and FFmpeg 6.1 or newer are required. `make test` runs the engine's headless tests.
