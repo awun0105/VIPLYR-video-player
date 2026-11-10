@@ -8,6 +8,8 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QScreen>
+#include <map>
 #include <QTimer>
 #include <cstdio>
 #include <functional>
@@ -75,9 +77,19 @@ int main(int argc, char *argv[]) {
 
     int framesShown = 0;
     double lastFrameTime = -1.0;
+    QElapsedTimer clock;
+    clock.start();
+    std::vector<qint64> shownAtNs;  // when each new frame reached the screen
+    bool recordCadence = false;
+    bool newFrameDrawn = false;
     QObject::connect(&widget, &VideoWidget::frameShown, [&](double seconds) {
         ++framesShown;
         lastFrameTime = seconds;
+        newFrameDrawn = true;
+    });
+    QObject::connect(&widget, &QOpenGLWidget::frameSwapped, [&] {
+        if (recordCadence && newFrameDrawn) shownAtNs.push_back(clock.nsecsElapsed());
+        newFrameDrawn = false;
     });
     const auto framesSince = [&](int before) { return framesShown - before; };
 
@@ -132,6 +144,7 @@ int main(int argc, char *argv[]) {
     std::printf("continuous playback for %d s (looping)\n", soakSeconds);
     controller.play();
     wait(1000);
+    recordCadence = true;
     const long startMemory = residentMegabytes();
     long peakMemory = startMemory;
     QElapsedTimer soak;
@@ -144,7 +157,27 @@ int main(int argc, char *argv[]) {
         peakMemory = std::max(peakMemory, residentMegabytes());
         if (!controller.isPlaying()) controller.seekTo(0), controller.play();  // loop at the end
     }
+    recordCadence = false;
     const double fps = soakFrames * 1000.0 / soak.elapsed();
+
+    // How many screen refreshes each frame stayed up. 24 fps on 60 Hz is ideally 2,3,2,3...;
+    // 1s and 4s mean a frame was shown late or skipped.
+    const double refresh = widget.screen()->refreshRate();
+    std::map<int, int> refreshesPerFrame;
+    for (size_t i = 1; i < shownAtNs.size(); ++i) {
+        const double ms = (shownAtNs[i] - shownAtNs[i - 1]) / 1e6;
+        ++refreshesPerFrame[static_cast<int>(std::lround(ms * refresh / 1000.0))];
+    }
+    std::printf("  screen %.0f Hz, video %.3f fps; refreshes per frame:", refresh, info.frameRate);
+    for (const auto &[refreshes, count] : refreshesPerFrame) std::printf("  %dx%d", refreshes, count);
+    std::printf("\n");
+    if (qEnvironmentVariableIsSet("CADENCE_RAW")) {
+        std::map<int, int> histogram;  // 2 ms buckets
+        for (size_t i = 1; i < shownAtNs.size(); ++i) ++histogram[static_cast<int>((shownAtNs[i] - shownAtNs[i - 1]) / 2e6) * 2];
+        std::printf("  intervals (ms):");
+        for (const auto &[ms, count] : histogram) std::printf("  %d:%d", ms, count);
+        std::printf("\n");
+    }
     std::printf("  %.1f frames/s shown, memory %ld MB -> peak %ld MB\n", fps, startMemory, peakMemory);
     CHECK(fps > info.frameRate * 0.85);
     CHECK(peakMemory < startMemory + 150);
