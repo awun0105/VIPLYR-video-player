@@ -144,34 +144,18 @@ checks trim handles, split/undo, file drops, project round trips and preview ord
 
 When the screen can take GPU frames directly, the player decodes on the GPU and draws each frame without copying it through system memory: VAAPI frames are imported as DMA-BUF through EGL (Intel/AMD), NVDEC frames are copied GPU-to-GPU through CUDA/OpenGL interop (when OpenGL runs on the NVIDIA GPU). 4K 60 fps then takes about 10–15% of one CPU core instead of 1–2.5 cores. Otherwise it decodes on the CPU, which beats decoding on the GPU and reading the frames back. The start-up line `Viplyr: GPU frames shown without a CPU copy: ...` tells which path is in use. `VIPLYR_HWACCEL=none|vaapi|cuda` forces a decoder (frames then go through system memory). Editing needs the `ffmpeg` program.
 
-### Build & Install
-1. **Clone & Build**:
+### Install a release (Ubuntu 24.04)
+Download `viplyr_<version>_amd64.deb` from [Releases](https://github.com/awun0105/VIPLYR-video-player/releases), then:
+```bash
+sudo apt install ./viplyr_*_amd64.deb
+```
+This installs `Viplyr`, its menu entry and icon, and pulls in Qt 6, FFmpeg and libass.
+
+### Build from source
 ```bash
 git clone https://github.com/awun0105/VIPLYR-video-player.git
 cd VIPLYR-video-player
 ./setup.sh
 ```
-
-2. **System Integration (Recommended)**:
-```bash
-# Install binary
-sudo cp build/Viplyr /usr/local/bin/Viplyr
-
-# Install icon
-mkdir -p ~/.local/share/icons
-cp icon/viplyr_icon.png ~/.local/share/icons/viplyr_icon.png
-
-# Create desktop entry for "Open With..." support
-cat > ~/.local/share/applications/Viplyr.desktop << EOF
-[Desktop Entry]
-Name=Viplyr
-Exec=/usr/local/bin/Viplyr %f
-Icon=/home/$USER/.local/share/icons/viplyr_icon.png
-Type=Application
-Categories=AudioVideo;Player;Video;
-Terminal=false
-MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/x-flv;video/mpeg;video/ogg;video/3gpp;
-EOF
-
-update-desktop-database ~/.local/share/applications/
-```
+Install it with `sudo cmake --install build` (binary, menu entry, icon under `/usr/local`),
+or build packages with `cd build && cpack` (`.deb` and `.tar.gz`).

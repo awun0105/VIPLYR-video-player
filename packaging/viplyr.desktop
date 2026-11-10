@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Viplyr
+GenericName=Video Player
+Comment=Play and edit videos
+Exec=Viplyr %F
+Icon=viplyr
+Type=Application
+Categories=AudioVideo;Player;Video;
+Terminal=false
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/x-flv;video/mpeg;video/ogg;video/3gpp;
