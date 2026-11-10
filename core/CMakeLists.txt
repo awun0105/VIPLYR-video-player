@@ -38,23 +38,28 @@ if(VIPLYR_BUILD_TESTS)
                 -f lavfi -i sine=frequency=440:sample_rate=44100
                 -t 3 -c:v libx264 -g 30 -bf 2 -pix_fmt yuv420p -c:a aac ${TEST_CLIP}
             VERBATIM)
-        # Interlaced, non-square pixels, two audio tracks and an embedded subtitle track.
+        # Interlaced, non-square pixels, two audio tracks (stereo and 5.1, with sound only in
+        # the front-left and centre channels), an embedded subtitle track and two chapters.
         set(TEST_SUBTITLES ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_subtitles.srt)
+        set(TEST_CHAPTERS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_chapters.ffmeta)
         set(TEST_TRACKS_CLIP ${CMAKE_CURRENT_BINARY_DIR}/test_tracks.mkv)
         add_custom_command(OUTPUT ${TEST_TRACKS_CLIP}
             COMMAND ${FFMPEG_EXECUTABLE} -y -loglevel error
                 -f lavfi -i testsrc2=size=360x288:rate=25
                 -f lavfi -i sine=frequency=440:sample_rate=44100
-                -f lavfi -i sine=frequency=880:sample_rate=44100
+                -f lavfi -i "aevalsrc=sin(880*2*PI*t)|0|0.5*sin(440*2*PI*t)|0|0|0:s=44100:c=5.1"
                 -i ${TEST_SUBTITLES}
-                -t 2 -map 0:v -map 1:a -map 2:a -map 3:s
+                -f ffmetadata -i ${TEST_CHAPTERS}
+                -t 2 -map 0:v -map 1:a -map 2:a -map 3:s -map_chapters 4
                 -c:v libx264 -flags +ilme+ildct -top 1 -aspect 16:9 -pix_fmt yuv420p
                 -c:a aac -c:s srt
                 -metadata:s:a:0 language=eng -metadata:s:a:1 language=vie
                 -metadata:s:s:0 language=vie ${TEST_TRACKS_CLIP}
-            DEPENDS ${TEST_SUBTITLES} VERBATIM)
+            DEPENDS ${TEST_SUBTITLES} ${TEST_CHAPTERS} VERBATIM)
         add_executable(core_tests tests/core_tests.cpp ${TEST_CLIP} ${TEST_TRACKS_CLIP})
-        target_link_libraries(core_tests PRIVATE viplyr_core Threads::Threads)
-        add_test(NAME core_tests COMMAND core_tests ${TEST_CLIP} ${TEST_TRACKS_CLIP})
+        # FFmpeg directly too: one test writes its own bitmap subtitle file.
+        target_link_libraries(core_tests PRIVATE viplyr_core Threads::Threads PkgConfig::FFMPEG)
+        add_test(NAME core_tests COMMAND core_tests ${TEST_CLIP} ${TEST_TRACKS_CLIP}
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_styled.ass)
     endif()
 endif()

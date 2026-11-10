@@ -15,7 +15,7 @@ Install prerequisites on Debian/Ubuntu with:
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config qt6-base-dev qt6-multimedia-dev \
-  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libegl-dev pybind11-dev python3-dev
+  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libass-dev libegl-dev pybind11-dev python3-dev
 ```
 
 ## Architecture & Logic
@@ -33,7 +33,7 @@ Run `make test` after any change in `core/`. Then verify UI changes with manual 
 1. Rebuild and launch.
 2. Drag-and-drop large directories to test async loading.
 3. Hover over the seek bar to verify thumbnail extraction.
-4. Verify hotkeys: `Space` (Play/Pause), `F` (Fullscreen), `M` (Mute), `T` (Always on Top), `R` (Rotate), `Arrows` (Volume/Seek), `,` / `.` (frame step), `I` (info), `S` (snapshot), `E` (export), `P` (playlist).
+4. Verify hotkeys: `Space` (Play/Pause), `F` (Fullscreen), `M` (Mute), `T` (Always on Top), `R` (Rotate), `Arrows` (Volume/Seek), `,` / `.` (frame step), `I` (info), `S` (snapshot), `E` (export), `P` (playlist), `L` (A-B loop), `PgUp`/`PgDn` (chapters), `1`-`8`/`0` (picture controls).
 5. Load a video with a matching `.srt` file to verify subtitle sync.
 
 ## Commit & Pull Request Guidelines

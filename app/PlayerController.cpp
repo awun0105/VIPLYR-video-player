@@ -145,6 +145,10 @@ QString PlayerController::currentPath() const {
 void PlayerController::openCurrent(bool startPlaying, qint64 startPositionMs, int audioStreamIndex) {
     rememberPosition();  // of the video that is about to be replaced
     cancelSubtitleLoading();
+    if (currentPath() != openPath_) {  // reopening the same video keeps these
+        clearLoop();
+        emit pictureSubtitlesChanged(nullptr);
+    }
 
     pendingRequest_ = {currentPath(), startPlaying, startPositionMs, audioStreamIndex};
     isOpening_ = true;
@@ -216,6 +220,7 @@ void PlayerController::waitForOpenTask() {
 }
 
 void PlayerController::closeMedia() {
+    clearLoop();
     cancelSubtitleLoading();
     waitForOpenTask();
     rememberPosition();
@@ -223,6 +228,7 @@ void PlayerController::closeMedia() {
     openPath_.clear();
     subtitles_.clear();
     setSubtitleText(QString());
+    emit pictureSubtitlesChanged(nullptr);
     emit currentIndexChanged(playlist_.currentIndex());
     emit durationChanged(0);
     emit mediaClosed();
@@ -230,6 +236,11 @@ void PlayerController::closeMedia() {
 
 void PlayerController::handleEnded() {
     if (isOpening_ || player_.state() != viplyr::State::Ended) return;  // a newer video took over
+    if (loopEndMs_ >= 0) {  // B at the very end of the video
+        seekTo(loopStartMs_);
+        play();
+        return;
+    }
     QSettings().remove(resumeKey(openPath_));  // watched to the end: start over next time
     if (playlist_.next()) openCurrent(true);
 }
@@ -265,6 +276,41 @@ void PlayerController::setGpuFramePath(viplyr::HwAccel decoder) {
     }
 }
 
+void PlayerController::seekChapter(int direction) {
+    if (!hasMedia()) return;
+    const std::vector<viplyr::Chapter> &chapters = player_.info().chapters;
+    if (chapters.empty()) return;
+    const double now = position() / 1000.0;
+    int current = 0;  // the chapter containing `now`
+    for (size_t i = 0; i < chapters.size(); ++i) {
+        if (chapters[i].start <= now + 0.01) current = static_cast<int>(i);
+    }
+    int target = current + direction;
+    if (direction < 0 && now - chapters[current].start > kRestartThresholdMs / 1000.0) target = current;
+    if (target < 0 || target >= static_cast<int>(chapters.size())) return;
+    seekTo(static_cast<qint64>(chapters[target].start * 1000.0));
+}
+
+void PlayerController::cycleLoop() {
+    if (!hasMedia()) return;
+    const qint64 current = position();
+    if (loopStartMs_ < 0) {
+        loopStartMs_ = current;
+    } else if (loopEndMs_ < 0 && current > loopStartMs_) {
+        loopEndMs_ = current;
+    } else {
+        clearLoop();
+        return;
+    }
+    emit loopChanged(loopStartMs_, loopEndMs_);
+}
+
+void PlayerController::clearLoop() {
+    if (loopStartMs_ < 0) return;
+    loopStartMs_ = loopEndMs_ = -1;
+    emit loopChanged(-1, -1);
+}
+
 void PlayerController::setAudioTrack(int streamIndex) {
     if (!hasMedia() || streamIndex == player_.info().audioStreamIndex) return;
     // The engine chooses its audio stream when it opens, so reopen at the same place.
@@ -283,6 +329,7 @@ void PlayerController::setSubtitleTrack(int track) {
     subtitleTrack_ = track;
     subtitles_.clear();
     setSubtitleText(QString());
+    emit pictureSubtitlesChanged(nullptr);
 
     if (track == kSubtitlesOff) return;
     if (track == kSubtitlesExternalFile) {
@@ -295,10 +342,13 @@ void PlayerController::setSubtitleTrack(int track) {
     auto cancelled = std::make_shared<std::atomic<bool>>(false);
     subtitleLoadCancelled_ = cancelled;
     QtConcurrent::run([path, track, cancelled] {
-        return viplyr::readSubtitleTrack(path.toStdString(), track, cancelled.get());
-    }).then(this, [this, cancelled](const std::vector<viplyr::SubtitleCue> &cues) {
+        return std::make_shared<const viplyr::SubtitleTrackData>(
+            viplyr::readSubtitleTrack(path.toStdString(), track, cancelled.get()));
+    }).then(this, [this, cancelled](std::shared_ptr<const viplyr::SubtitleTrackData> data) {
         if (cancelled->load()) return;  // another track or video was chosen meanwhile
-        subtitles_.setCues(cues);
+        // Styled and bitmap tracks are drawn over the picture; plain text goes to the label.
+        if (data->isAss || data->isBitmap) emit pictureSubtitlesChanged(data);
+        else subtitles_.setCues(data->cues);
     });
 }
 
@@ -368,6 +418,10 @@ qint64 PlayerController::duration() const { return hasMedia() ? qRound64(player_
 
 void PlayerController::refreshPosition() {
     const qint64 current = position();
+    if (loopEndMs_ >= 0 && current >= loopEndMs_ && isPlaying()) {
+        seekTo(loopStartMs_);
+        return;
+    }
     if (current == lastPosition_) return;
     lastPosition_ = current;
     emit positionChanged(current);

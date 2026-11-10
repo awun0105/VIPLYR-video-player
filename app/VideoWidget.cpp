@@ -4,6 +4,7 @@
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QPainter>
+#include <QVector4D>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,7 @@ const char *kFragmentShader = R"(
     uniform vec3 yuvOffset;
     uniform mat3 yuvToRgb;
     uniform int transfer;         // 0 = SDR, 1 = PQ (HDR10), 2 = HLG
+    uniform vec4 adjustments;     // brightness offset, contrast, saturation, gamma exponent
     varying vec2 uv;
 
     // BT.2020 primaries to the screen's BT.709 primaries.
@@ -93,7 +95,12 @@ const char *kFragmentShader = R"(
             light = hable(light * 2.0) / hable(vec3(whitePoint));
             rgb = pow(clamp(light, 0.0, 1.0), vec3(1.0 / 2.2));
         }
-        gl_FragColor = vec4(rgb, 1.0);
+
+        // The viewer's picture adjustments (all neutral by default).
+        rgb = pow(clamp(rgb, 0.0, 1.0), vec3(adjustments.w));
+        rgb = (rgb - 0.5) * adjustments.y + 0.5 + adjustments.x;
+        rgb = mix(vec3(dot(rgb, vec3(0.2126, 0.7152, 0.0722))), rgb, adjustments.z);
+        gl_FragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
     }
 )";
 
@@ -231,6 +238,19 @@ void VideoWidget::paintGL() {
         pendingFrame_ = viplyr::VideoFrame();
     }
 
+    // The video is drawn with OpenGL directly, the overlays with QPainter. Wrapping our
+    // calls in native painting makes QPainter resync the state it caches (bound textures,
+    // program), which our calls change behind its back.
+    QPainter painter(this);
+    painter.beginNativePainting();
+    drawVideo(newFrame);
+    painter.endNativePainting();
+
+    drawOverlays(painter);
+    if (newFrame.isValid()) emit frameShown(shownFrame_.pts());
+}
+
+void VideoWidget::drawVideo(viplyr::VideoFrame &newFrame) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -253,6 +273,12 @@ void VideoWidget::paintGL() {
     static const GLfloat texCoords[] = {0, 1, 1, 1, 0, 0, 1, 0};
 
     program_.setUniformValue("transform", viewTransform());
+    // -100..100 each: brightness shifts, contrast and saturation scale (0 to 2x), gamma
+    // bends the mid-tones (an exponent from 1/4 to 4).
+    program_.setUniformValue("adjustments",
+                             QVector4D(adjustments_.brightness / 200.0f, 1.0f + adjustments_.contrast / 100.0f,
+                                       1.0f + adjustments_.saturation / 100.0f,
+                                       std::pow(4.0f, -adjustments_.gamma / 100.0f)));
     program_.setUniformValue("textureY", 0);
     program_.setUniformValue("textureU", 1);
     program_.setUniformValue("textureV", 2);
@@ -269,9 +295,6 @@ void VideoWidget::paintGL() {
     program_.disableAttributeArray(0);
     program_.disableAttributeArray(1);
     program_.release();
-
-    drawOverlays();
-    if (newFrame.isValid()) emit frameShown(shownFrame_.pts());
 }
 
 void VideoWidget::uploadFrame(const viplyr::VideoFrame &frame) {
@@ -407,13 +430,28 @@ QPointF VideoWidget::videoToWidget(const QPointF &videoPixel) const {
     return QPointF((normalized.x() + 1.0) * width() / 2.0, (1.0 - normalized.y()) * height() / 2.0);
 }
 
-void VideoWidget::drawOverlays() {
+void VideoWidget::drawOverlays(QPainter &painter) {
     const QVector<OverlayShape> shapes =
         overlayTrack_ ? overlayTrack_->shapesAt(shownFrame_.pts()) : QVector<OverlayShape>();
-    if (shapes.isEmpty() && cropPreview_.isNull()) return;
-
-    QPainter painter(this);
+    if (!shownFrame_.isValid() || (shapes.isEmpty() && cropPreview_.isNull() && pictureSubtitles_.isEmpty())) return;
     painter.setRenderHint(QPainter::Antialiasing);
+
+    if (!pictureSubtitles_.isEmpty()) {
+        // Map video pixels onto the picture as shown (fit, zoom, pan, rotation, pixel shape).
+        const QPolygonF video({QPointF(0, 0), QPointF(frameWidth_, 0), QPointF(frameWidth_, frameHeight_),
+                               QPointF(0, frameHeight_)});
+        const QPolygonF screen({videoToWidget(video[0]), videoToWidget(video[1]), videoToWidget(video[2]),
+                                videoToWidget(video[3])});
+        QTransform toScreen;
+        if (QTransform::quadToQuad(video, screen, toScreen)) {
+            const QSize screenSize(qRound(QLineF(screen[0], screen[1]).length()),
+                                   qRound(QLineF(screen[1], screen[2]).length()));
+            painter.save();
+            painter.setTransform(toScreen);
+            pictureSubtitles_.draw(painter, shownFrame_.pts(), QSize(frameWidth_, frameHeight_), screenSize);
+            painter.restore();
+        }
+    }
 
     // A rectangle in the video becomes a (possibly rotated) polygon on screen.
     const auto toPolygon = [this](const QRectF &rect) {
@@ -449,6 +487,16 @@ void VideoWidget::drawOverlays() {
         painter.setBrush(Qt::NoBrush);
         painter.drawPolygon(toPolygon(cropPreview_));
     }
+}
+
+void VideoWidget::setPictureAdjustments(const PictureAdjustments &adjustments) {
+    adjustments_ = adjustments;
+    update();
+}
+
+void VideoWidget::setPictureSubtitles(std::shared_ptr<const viplyr::SubtitleTrackData> track) {
+    pictureSubtitles_.setTrack(std::move(track));
+    update();
 }
 
 void VideoWidget::setOverlayTrack(const OverlayTrack *track) {

@@ -8,7 +8,7 @@ class ThumbnailPopup : public QWidget {
     Q_OBJECT
 public:
     explicit ThumbnailPopup(QWidget *parent = nullptr);
-    void setTime(qint64 positionMs);
+    void setTime(qint64 positionMs, const QString &chapter = QString());
     void setPicture(const QPixmap &pixmap);  // a null pixmap shows "Loading..."
 
 private:

@@ -39,6 +39,7 @@ constexpr int kHideDelayMs = 3000;
 constexpr int kFadeDurationMs = 180;
 constexpr qint64 kSeekStepMs = 5000;
 constexpr int kVolumeStep = 5;
+constexpr int kAdjustmentStep = 5;
 constexpr int kPlaylistWidth = 300;
 constexpr qint64 kThumbnailStepMs = 1000;
 
@@ -163,6 +164,13 @@ void MainWindow::wireConnections() {
     connect(controller_, &PlayerController::subtitleTextChanged, videoWidget_, &VideoWidget::setSubtitleText);
     connect(controller_, &PlayerController::errorOccurred, this, &MainWindow::showError);
     connect(controller_, &PlayerController::mediaOpened, this, &MainWindow::onMediaOpened);
+    connect(controller_, &PlayerController::pictureSubtitlesChanged, videoWidget_, &VideoWidget::setPictureSubtitles);
+    connect(controller_, &PlayerController::loopChanged, this, [this](qint64 startMs, qint64 endMs) {
+        controlBar_->seekSlider()->setHighlight(static_cast<int>(startMs), static_cast<int>(endMs));
+        if (startMs < 0) videoWidget_->showMessage("Loop off");
+        else if (endMs < 0) videoWidget_->showMessage("Loop start set: press L again at the end");
+        else videoWidget_->showMessage(QString("Looping %1 - %2").arg(MediaFiles::formatTime(startMs), MediaFiles::formatTime(endMs)));
+    });
     connect(controller_, &PlayerController::mediaClosed, this, &MainWindow::onMediaClosed);
     connect(controller_, &PlayerController::resumed, this, [this](qint64 positionMs) {
         videoWidget_->showMessage("Resumed from " + MediaFiles::formatTime(positionMs));
@@ -211,6 +219,29 @@ void MainWindow::createShortcuts() {
     bind(Qt::Key_I, [this] { toggleInfo(); });
     bind(Qt::Key_S, [this] { saveSnapshot(); });
     bind(Qt::Key_E, [this] { openExportDialog(); });
+    bind(Qt::Key_L, [this] { controller_->cycleLoop(); });
+    bind(Qt::Key_PageDown, [this] { controller_->seekChapter(1); });
+    bind(Qt::Key_PageUp, [this] { controller_->seekChapter(-1); });
+    // Picture adjustments, in pairs like mpv: 1/2 contrast, 3/4 brightness, 5/6 gamma,
+    // 7/8 saturation; 0 resets them.
+    const auto adjust = [this](int PictureAdjustments::*field, const char *name, int delta) {
+        PictureAdjustments adjustments = videoWidget_->pictureAdjustments();
+        adjustments.*field = qBound(-100, adjustments.*field + delta, 100);
+        videoWidget_->setPictureAdjustments(adjustments);
+        videoWidget_->showMessage(QString("%1 %2%3").arg(name).arg(adjustments.*field > 0 ? "+" : "").arg(adjustments.*field));
+    };
+    bind(Qt::Key_1, [adjust] { adjust(&PictureAdjustments::contrast, "Contrast", -kAdjustmentStep); });
+    bind(Qt::Key_2, [adjust] { adjust(&PictureAdjustments::contrast, "Contrast", kAdjustmentStep); });
+    bind(Qt::Key_3, [adjust] { adjust(&PictureAdjustments::brightness, "Brightness", -kAdjustmentStep); });
+    bind(Qt::Key_4, [adjust] { adjust(&PictureAdjustments::brightness, "Brightness", kAdjustmentStep); });
+    bind(Qt::Key_5, [adjust] { adjust(&PictureAdjustments::gamma, "Gamma", -kAdjustmentStep); });
+    bind(Qt::Key_6, [adjust] { adjust(&PictureAdjustments::gamma, "Gamma", kAdjustmentStep); });
+    bind(Qt::Key_7, [adjust] { adjust(&PictureAdjustments::saturation, "Saturation", -kAdjustmentStep); });
+    bind(Qt::Key_8, [adjust] { adjust(&PictureAdjustments::saturation, "Saturation", kAdjustmentStep); });
+    bind(Qt::Key_0, [this] {
+        videoWidget_->setPictureAdjustments(PictureAdjustments());
+        videoWidget_->showMessage("Picture reset");
+    });
     bind(QKeySequence(Qt::CTRL | Qt::Key_G), [this] { askForFrame(); });
     bind(QKeySequence(Qt::CTRL | Qt::Key_O), [this] { chooseFiles(false); });
     bind(QKeySequence(Qt::CTRL | Qt::Key_U), [this] { chooseUrl(); });
@@ -295,6 +326,9 @@ void MainWindow::refreshPlaylistPanel() {
 
 void MainWindow::onMediaOpened(const QString &path) {
     const viplyr::MediaInfo info = controller_->mediaInfo();
+    QVector<int> chapterStarts;
+    for (const viplyr::Chapter &chapter : info.chapters) chapterStarts.append(qRound(chapter.start * 1000.0));
+    controlBar_->seekSlider()->setMarks(chapterStarts);
     videoWidget_->setMediaGeometry(info.rotationDegrees, info.pixelAspectRatio);
     overlayTrack_.loadForVideo(path);
     thumbnails_->setSource(path.contains("://") ? QString() : path);
@@ -304,6 +338,7 @@ void MainWindow::onMediaOpened(const QString &path) {
 
 void MainWindow::onMediaClosed() {
     videoWidget_->clear();
+    controlBar_->seekSlider()->setMarks({});
     overlayTrack_.clear();
     thumbnails_->setSource(QString());
     setWindowTitle("Viplyr");
@@ -395,9 +430,7 @@ void MainWindow::showTracksMenu() {
     }
     for (size_t i = 0; i < info.subtitleTracks.size(); ++i) {
         const viplyr::TrackInfo &track = info.subtitleTracks[i];
-        // Picture-based subtitles (DVD, Blu-ray) cannot be shown yet.
-        const QString suffix = track.isText ? QString() : QString(" - image subtitles, not supported");
-        addSubtitleChoice(describeTrack(track, static_cast<int>(i) + 1) + suffix, track.streamIndex, track.isText);
+        addSubtitleChoice(describeTrack(track, static_cast<int>(i) + 1), track.streamIndex, true);
     }
 
     const QToolButton *anchor = controlBar_->tracksButton();
@@ -486,7 +519,11 @@ void MainWindow::showThumbnail(int positionMs) {
     if (thumbnailPopup_->isHidden()) thumbnailPopup_->setPicture(QPixmap());
     // The previous picture stays until the new one arrives, so sweeping does not flicker.
     wantedThumbnailMs_ = wanted;
-    thumbnailPopup_->setTime(positionMs);
+    QString chapterTitle;
+    for (const viplyr::Chapter &chapter : controller_->mediaInfo().chapters) {
+        if (chapter.start * 1000.0 <= positionMs) chapterTitle = QString::fromStdString(chapter.title);
+    }
+    thumbnailPopup_->setTime(positionMs, chapterTitle);
     thumbnails_->request(wanted);
 
     const JumpSlider *seekSlider = controlBar_->seekSlider();

@@ -49,14 +49,51 @@ std::string textOf(const AVSubtitle &subtitle) {
     return text;
 }
 
+
+std::vector<SubtitleBitmap> bitmapsOf(const AVSubtitle &subtitle) {
+    std::vector<SubtitleBitmap> bitmaps;
+    for (unsigned i = 0; i < subtitle.num_rects; ++i) {
+        const AVSubtitleRect *rect = subtitle.rects[i];
+        if (rect->type != SUBTITLE_BITMAP || rect->w <= 0 || rect->h <= 0 || !rect->data[0]) continue;
+        SubtitleBitmap bitmap;
+        bitmap.x = rect->x;
+        bitmap.y = rect->y;
+        bitmap.width = rect->w;
+        bitmap.height = rect->h;
+        bitmap.indices.resize(static_cast<size_t>(rect->w) * rect->h);
+        for (int row = 0; row < rect->h; ++row) {
+            std::copy_n(rect->data[0] + static_cast<size_t>(row) * rect->linesize[0], rect->w,
+                        bitmap.indices.begin() + static_cast<ptrdiff_t>(row) * rect->w);
+        }
+        const auto *palette = reinterpret_cast<const uint32_t *>(rect->data[1]);
+        bitmap.palette.assign(palette, palette + std::max(0, std::min(rect->nb_colors, 256)));
+        bitmap.palette.resize(256, 0);  // indices past nb_colors are transparent
+        bitmaps.push_back(std::move(bitmap));
+    }
+    return bitmaps;
+}
+
+std::string assEventsOf(const AVSubtitle &subtitle) {
+    std::string events;
+    for (unsigned i = 0; i < subtitle.num_rects; ++i) {
+        const AVSubtitleRect *rect = subtitle.rects[i];
+        if (rect->type != SUBTITLE_ASS || !rect->ass) continue;
+        if (!events.empty()) events += '\n';
+        events += rect->ass;
+    }
+    return events;
+}
+
 }  // namespace
 
-std::vector<SubtitleCue> readSubtitleTrack(const std::string &url, int streamIndex,
-                                           const std::atomic<bool> *cancel, std::string *error) {
-    std::vector<SubtitleCue> cues;
+SubtitleTrackData readSubtitleTrack(const std::string &url, int streamIndex, const std::atomic<bool> *cancel,
+                                    std::string *error) {
+    SubtitleTrackData track;
     AVFormatContext *format = openInput(url, {}, error);
-    if (!format) return cues;
+    if (!format) return track;
 
+    // A subtitle file has one track; take it when no index is given.
+    if (streamIndex < 0) streamIndex = av_find_best_stream(format, AVMEDIA_TYPE_SUBTITLE, -1, -1, nullptr, 0);
     const bool validIndex = streamIndex >= 0 && streamIndex < static_cast<int>(format->nb_streams) &&
                             format->streams[streamIndex]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
     AVCodecContext *decoder = validIndex ? openDecoder(format->streams[streamIndex], HwAccel::None,
@@ -65,15 +102,25 @@ std::vector<SubtitleCue> readSubtitleTrack(const std::string &url, int streamInd
     if (!decoder) {
         if (error && error->empty()) *error = "Not a subtitle track";
         avformat_close_input(&format);
-        return cues;
+        return track;
     }
+
+    const AVStream *stream = format->streams[streamIndex];
+    const AVCodecID codecId = stream->codecpar->codec_id;
+    track.isAss = codecId == AV_CODEC_ID_ASS || codecId == AV_CODEC_ID_SSA;
+    track.isBitmap = (avcodec_descriptor_get(codecId)->props & AV_CODEC_PROP_BITMAP_SUB) != 0;
+    if (track.isAss && decoder->subtitle_header) {
+        track.assHeader.assign(reinterpret_cast<const char *>(decoder->subtitle_header),
+                               static_cast<size_t>(decoder->subtitle_header_size));
+    }
+    track.canvasWidth = decoder->width;
+    track.canvasHeight = decoder->height;
 
     // Let the demuxer skip the audio and video data: only the subtitle packets matter.
     for (unsigned i = 0; i < format->nb_streams; ++i) {
         format->streams[i]->discard = static_cast<int>(i) == streamIndex ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
     }
 
-    const AVStream *stream = format->streams[streamIndex];
     // Use the same time origin as Player and FrameReader, so cues line up with the picture.
     const int videoIndex = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     const double startOffset =
@@ -89,22 +136,34 @@ std::vector<SubtitleCue> readSubtitleTrack(const std::string &url, int streamInd
                 SubtitleCue cue;
                 cue.start = packetTime + subtitle.start_display_time / 1000.0;
                 // Some formats give the length on the packet instead of the subtitle.
-                cue.end = subtitle.end_display_time > 0
+                cue.end = subtitle.end_display_time > 0 && subtitle.end_display_time != UINT32_MAX
                               ? packetTime + subtitle.end_display_time / 1000.0
                               : packetTime + toSeconds(packet->duration, stream->time_base);
                 cue.text = textOf(subtitle);
-                if (!cue.text.empty() && cue.end > cue.start) cues.push_back(std::move(cue));
+                if (track.isAss) cue.assEvent = assEventsOf(subtitle);
+                cue.bitmaps = bitmapsOf(subtitle);
+                const bool hasContent = !cue.text.empty() || !cue.bitmaps.empty();
+                // A bitmap track clears the screen with an empty subtitle, which also ends
+                // the previous one when its length was not known.
+                if (track.isBitmap && !track.cues.empty() && track.cues.back().end <= track.cues.back().start) {
+                    track.cues.back().end = cue.start;
+                }
+                if (hasContent && (cue.end > cue.start || track.isBitmap)) track.cues.push_back(std::move(cue));
                 avsubtitle_free(&subtitle);
             }
         }
         av_packet_unref(packet.get());
     }
 
+    // A last bitmap cue without a length stays up for a few seconds.
+    if (track.isBitmap && !track.cues.empty() && track.cues.back().end <= track.cues.back().start) {
+        track.cues.back().end = track.cues.back().start + 5.0;
+    }
     avcodec_free_context(&decoder);
     avformat_close_input(&format);
-    std::sort(cues.begin(), cues.end(),
+    std::sort(track.cues.begin(), track.cues.end(),
               [](const SubtitleCue &a, const SubtitleCue &b) { return a.start < b.start; });
-    return cues;
+    return track;
 }
 
 }  // namespace viplyr

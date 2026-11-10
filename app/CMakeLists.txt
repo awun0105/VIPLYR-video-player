@@ -1,5 +1,7 @@
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets Multimedia Concurrent DBus)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBASS REQUIRED IMPORTED_TARGET libass)  # styled (ASS) subtitles
 
 add_executable(Viplyr
     main.cpp
@@ -19,6 +21,7 @@ add_executable(Viplyr
     PlayerController.cpp
     PlaylistPanel.cpp
     StartPanel.cpp
+    SubtitleRenderer.cpp
     SubtitleTrack.cpp
     ThumbnailPopup.cpp
     ThumbnailProvider.cpp
@@ -26,7 +29,7 @@ add_executable(Viplyr
 )
 target_link_libraries(Viplyr PRIVATE
     viplyr_core
-    Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::DBus ${CMAKE_DL_LIBS})
+    Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent Qt6::DBus PkgConfig::LIBASS ${CMAKE_DL_LIBS})
 target_compile_options(Viplyr PRIVATE -Wall -Wextra)
 # Keep the binary at build/Viplyr, where the Makefile and the desktop entry expect it.
 set_target_properties(Viplyr PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -36,10 +39,10 @@ if(VIPLYR_BUILD_TESTS)
     # display, so it is run by hand: build/app/display_tests <video> [seconds].
     add_executable(display_tests tests/display_tests.cpp
         AudioOutput.cpp CudaGlInterop.cpp DmaBufImporter.cpp OverlayTrack.cpp
-        PlayerController.cpp SubtitleTrack.cpp VideoWidget.cpp)
+        PlayerController.cpp SubtitleRenderer.cpp SubtitleTrack.cpp VideoWidget.cpp)
     target_include_directories(display_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(display_tests PRIVATE viplyr_core
-        Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent ${CMAKE_DL_LIBS})
+        Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent PkgConfig::LIBASS ${CMAKE_DL_LIBS})
 
     find_program(FFMPEG_EXECUTABLE ffmpeg)
     if(FFMPEG_EXECUTABLE)

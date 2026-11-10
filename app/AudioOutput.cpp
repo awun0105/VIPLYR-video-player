@@ -17,11 +17,16 @@ AudioOutput::AudioOutput(QObject *parent) : QIODevice(parent) {
 
     const QAudioFormat preferred = device.preferredFormat();
     format_.sampleRate = preferred.sampleRate() > 0 ? preferred.sampleRate() : 48000;
-    format_.channels = std::min(2, std::max(1, preferred.channelCount()));
+    // As many channels as the device is set up for: 5.1 and 7.1 systems get every channel,
+    // stereo devices get a downmix (made by the engine's audio filter). FFmpeg's default
+    // 5.1/7.1 channel orders match Qt's, so only these counts are used.
+    const int deviceChannels = preferred.channelCount();
+    format_.channels = deviceChannels == 1 || deviceChannels == 6 || deviceChannels == 8 ? deviceChannels : 2;
 
     QAudioFormat audioFormat;
     audioFormat.setSampleRate(format_.sampleRate);
     audioFormat.setChannelCount(format_.channels);
+    audioFormat.setChannelConfig(QAudioFormat::defaultChannelConfigForChannelCount(format_.channels));
     audioFormat.setSampleFormat(QAudioFormat::Float);
     if (!device.isFormatSupported(audioFormat)) return;
 

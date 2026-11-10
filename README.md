@@ -52,7 +52,8 @@ Viplyr/
 - **Frame-Accurate Seeking & Stepping**: Seek to an exact frame, step frame by frame, jump to frame N.
 - **Playback Speed**: 0.5x to 2.0x without changing the pitch.
 - **Resume**: Each video continues where it was left.
-- **Audio Tracks & Subtitles**: Choose the audio track; subtitles from a `.srt` file next to the video or from a text track inside it.
+- **Audio Tracks & Subtitles**: Choose the audio track; subtitles from a `.srt` file next to the video or from a track inside it: text, styled ASS/SSA (fonts, colours, positions, through libass) and picture subtitles (DVD, Blu-ray PGS, DVB). 5.1 and 7.1 sound reach a surround device channel by channel.
+- **Chapters, A-B Loop, Picture Controls**: Chapter marks on the seek bar and in the preview; loop a passage; brightness, contrast, gamma and saturation.
 - **Formats**: Anything the system FFmpeg decodes. Interlaced video is deinterlaced, non-square pixels are shown at the right shape, 10-bit and HDR (PQ/HLG) video is tone-mapped for a normal screen.
 - **Network Streams**: Open `rtsp://`, `http://` and similar addresses.
 
@@ -85,6 +86,9 @@ Viplyr/
 | `Left` / `Right` | Seek backward / forward 5s |
 | `,` / `.` | Step one frame back / forward |
 | `Ctrl+G` | Go to frame number |
+| `PgUp` / `PgDn` | Previous / next chapter |
+| `L` | A-B loop: set A, set B, clear |
+| `1`/`2` `3`/`4` `5`/`6` `7`/`8` | Contrast, brightness, gamma, saturation down / up; `0` resets |
 | `Up` / `Down` | Volume |
 | `M` | Mute / Unmute |
 | `F` / `Double Click` / `Esc` | Fullscreen on, off |
@@ -117,7 +121,7 @@ To use the engine in another project, build with `-DVIPLYR_BUILD_APP=OFF` and li
 sudo apt update
 sudo apt install build-essential cmake ninja-build pkg-config \
                  qt6-base-dev qt6-multimedia-dev \
-                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libegl-dev
+                 libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev libass-dev libegl-dev
 # optional, for `import viplyr`: pybind11-dev python3-dev
 ```
 

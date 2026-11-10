@@ -15,6 +15,11 @@
 #include "viplyr/SubtitleReader.h"
 #include "viplyr/VideoRecorder.h"
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+}
+
 using namespace viplyr;
 
 namespace {
@@ -71,6 +76,40 @@ struct RecordingVideoSink : IVideoSink {
 
     std::mutex mutex;
     std::vector<Entry> entries;
+};
+
+// Accepts everything at once and measures the level of each channel.
+struct ChannelEnergySink : IAudioSink {
+    explicit ChannelEnergySink(int channelCount) : sumOfSquares(static_cast<size_t>(channelCount), 0.0) {
+        audioFormat.sampleRate = 44100;
+        audioFormat.channels = channelCount;
+    }
+    AudioFormat format() const override { return audioFormat; }
+    size_t write(const float *samples, size_t frameCount) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (size_t i = 0; i < frameCount; ++i) {
+            for (size_t c = 0; c < sumOfSquares.size(); ++c) {
+                const double value = samples[i * sumOfSquares.size() + c];
+                sumOfSquares[c] += value * value;
+            }
+        }
+        frames += frameCount;
+        return frameCount;
+    }
+    double bufferedSeconds() const override { return 0.1; }
+    void flush() override {}
+    void setPaused(bool) override {}
+    std::vector<double> rms() {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<double> result;
+        for (double sum : sumOfSquares) result.push_back(frames ? std::sqrt(sum / frames) * std::sqrt(2.0) : 0.0);
+        return result;  // 1.0 for a full-scale sine
+    }
+
+    AudioFormat audioFormat;
+    std::mutex mutex;
+    std::vector<double> sumOfSquares;
+    size_t frames = 0;
 };
 
 // Behaves like a sound card: holds at most 0.2 s and plays it out in real time.
@@ -341,7 +380,9 @@ void testTracksAndFormats(const std::string &clip) {
     // Embedded subtitles.
     if (info.subtitleTracks.size() == 1) {
         CHECK(info.subtitleTracks[0].isText);
-        const std::vector<SubtitleCue> cues = readSubtitleTrack(clip, info.subtitleTracks[0].streamIndex);
+        const SubtitleTrackData track = readSubtitleTrack(clip, info.subtitleTracks[0].streamIndex);
+        const std::vector<SubtitleCue> &cues = track.cues;
+        CHECK(!track.isAss && !track.isBitmap);
         CHECK(cues.size() == 2);
         if (cues.size() == 2) {
             CHECK(near(cues[0].start, 0.2, 0.01) && near(cues[0].end, 0.9, 0.01));
@@ -365,9 +406,137 @@ void testTracksAndFormats(const std::string &clip) {
     CHECK(audio.framesWritten > 0);
     CHECK(video.snapshot().size() >= 10);  // the interlaced path delivers frames in real time
     player.close();
+
+    // Chapters, on the frames' time line.
+    CHECK(info.chapters.size() == 2);
+    if (info.chapters.size() == 2) {
+        CHECK(near(info.chapters[0].start, 0.0, 0.01) && near(info.chapters[0].end, 1.0, 0.01));
+        CHECK(info.chapters[0].title == "Opening" && info.chapters[1].title == "Ending");
+        CHECK(near(info.chapters[1].start, 1.0, 0.01));
+    }
+
+    // The 5.1 track keeps its channels on a 5.1 output and is mixed down on a stereo one.
+    if (info.audioTracks.size() == 2) {
+        for (int channels : {6, 2}) {
+            ChannelEnergySink sink(channels);
+            Player surround;
+            surround.setAudioSink(&sink);
+            OpenOptions surroundOptions;
+            surroundOptions.audioStreamIndex = info.audioTracks[1].streamIndex;
+            CHECK(surround.open(clip, surroundOptions, &error));
+            surround.play();
+            sleepSeconds(0.6);
+            surround.close();
+            const std::vector<double> rms = sink.rms();
+            if (channels == 6) {
+                std::printf("  5.1 output, channel levels: %.2f %.2f %.2f %.2f %.2f %.2f\n", rms[0], rms[1], rms[2],
+                            rms[3], rms[4], rms[5]);
+                CHECK(rms[0] > 0.5 && rms[2] > 0.25 && rms[1] < 0.01 && rms[3] < 0.01);  // FL and FC only
+            } else {
+                std::printf("  stereo output, channel levels: %.2f %.2f\n", rms[0], rms[1]);
+                CHECK(rms[0] > rms[1] && rms[1] > 0.05);  // the centre reaches both sides
+            }
+        }
+    }
 }
 
 }  // namespace
+
+// Writes a subtitle-only Matroska file with two DVD (bitmap) subtitles:
+// 0.5-1.5 s and 2.0-3.0 s, each a 200x40 picture at (100, 400) on a 720x480 canvas.
+bool writeBitmapSubtitleFile(const std::string &path) {
+    const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_DVD_SUBTITLE);
+    AVFormatContext *output = nullptr;
+    if (!codec || avformat_alloc_output_context2(&output, nullptr, "matroska", path.c_str()) < 0) return false;
+    AVCodecContext *encoder = avcodec_alloc_context3(codec);
+    encoder->width = 720;
+    encoder->height = 480;
+    encoder->time_base = {1, 1000};
+    bool ok = avcodec_open2(encoder, codec, nullptr) >= 0;
+    AVStream *stream = avformat_new_stream(output, nullptr);
+    ok = ok && avcodec_parameters_from_context(stream->codecpar, encoder) >= 0;
+    stream->time_base = {1, 1000};
+    ok = ok && avio_open(&output->pb, path.c_str(), AVIO_FLAG_WRITE) >= 0 && avformat_write_header(output, nullptr) >= 0;
+
+    std::vector<uint8_t> indices(200 * 40);
+    for (size_t i = 0; i < indices.size(); ++i) indices[i] = (i / 200) < 4 ? 2 : 1;  // a border row and a fill
+    uint32_t palette[4] = {0x00000000, 0xFFFFFFFF, 0xFF000000, 0xFF808080};
+    for (int startMs : {500, 2000}) {
+        if (!ok) break;
+        AVSubtitleRect rect = {};
+        AVSubtitleRect *rects[1] = {&rect};
+        rect.type = SUBTITLE_BITMAP;
+        rect.x = 100;
+        rect.y = 400;
+        rect.w = 200;
+        rect.h = 40;
+        rect.nb_colors = 4;
+        rect.data[0] = indices.data();
+        rect.linesize[0] = 200;
+        rect.data[1] = reinterpret_cast<uint8_t *>(palette);
+        AVSubtitle subtitle = {};
+        subtitle.num_rects = 1;
+        subtitle.rects = rects;
+        subtitle.start_display_time = 0;
+        subtitle.end_display_time = 1000;
+        subtitle.pts = static_cast<int64_t>(startMs) * 1000;
+        uint8_t buffer[65536];
+        const int size = avcodec_encode_subtitle(encoder, buffer, sizeof(buffer), &subtitle);
+        AVPacket *packet = av_packet_alloc();
+        ok = size > 0 && av_new_packet(packet, size) >= 0;
+        if (ok) {
+            std::copy_n(buffer, size, packet->data);
+            packet->pts = packet->dts = startMs;
+            packet->duration = 1000;
+            packet->stream_index = stream->index;
+            ok = av_interleaved_write_frame(output, packet) >= 0;
+        }
+        av_packet_free(&packet);
+    }
+    if (ok) ok = av_write_trailer(output) >= 0;
+    avcodec_free_context(&encoder);
+    avio_closep(&output->pb);
+    avformat_free_context(output);
+    return ok;
+}
+
+void testStyledAndBitmapSubtitles(const std::string &assFile) {
+    std::printf("styled and bitmap subtitles\n");
+    const SubtitleTrackData styled = readSubtitleTrack(assFile, -1);
+    CHECK(styled.isAss && !styled.isBitmap && styled.cues.size() == 2);
+    CHECK(styled.assHeader.find("PlayResX: 640") != std::string::npos);
+    CHECK(styled.assHeader.find("Style: Top") != std::string::npos);
+    if (styled.cues.size() == 2) {
+        CHECK(near(styled.cues[0].start, 0.5, 0.01) && near(styled.cues[0].end, 2.0, 0.01));
+        CHECK(styled.cues[0].text == "Green styled line");                     // plain text still there
+        CHECK(styled.cues[0].assEvent.find("{\\i1}styled") != std::string::npos);  // with its tags
+        CHECK(styled.cues[1].assEvent.find(",Top,") != std::string::npos);
+    }
+
+    const std::string bitmapFile = "bitmap_subtitles_test.mkv";
+    CHECK(writeBitmapSubtitleFile(bitmapFile));
+    const SubtitleTrackData bitmap = readSubtitleTrack(bitmapFile, -1);
+    CHECK(bitmap.isBitmap && !bitmap.isAss && bitmap.cues.size() == 2);
+    if (bitmap.cues.size() == 2) {
+        const SubtitleCue &first = bitmap.cues[0];
+        // DVD subtitles store their duration in steps of 1024/90000 s.
+        CHECK(near(first.start, 0.5, 0.01) && near(first.end, 1.5, 0.02) && near(bitmap.cues[1].start, 2.0, 0.01));
+        CHECK(first.bitmaps.size() == 1 && first.text.empty());
+        if (first.bitmaps.size() == 1) {
+            const SubtitleBitmap &picture = first.bitmaps[0];
+            std::printf("  bitmap %dx%d at (%d, %d) on %dx%d\n", picture.width, picture.height, picture.x, picture.y,
+                        bitmap.canvasWidth, bitmap.canvasHeight);
+            CHECK(picture.width == 200 && picture.height == 40 && picture.x == 100 && picture.y == 400);
+            CHECK(picture.indices.size() == 200u * 40u && picture.palette.size() == 256);
+            // The fill is opaque white, the top rows opaque black.
+            const uint32_t fill = picture.palette[picture.indices[20 * 200 + 100]];
+            const uint32_t border = picture.palette[picture.indices[100]];
+            CHECK((fill >> 24) > 0xC0 && (fill & 0xFFFFFF) == 0xFFFFFF);
+            CHECK((border >> 24) > 0xC0 && (border & 0xFFFFFF) == 0x000000);
+        }
+    }
+    std::remove(bitmapFile.c_str());
+}
 
 // GPU frames handed on without copying: DMA-BUF planes from VAAPI, device
 // planes from CUDA. Skipped for a decoder this machine does not have.
@@ -488,6 +657,7 @@ int main(int argc, char **argv) {
     testRecorder(clip, "libx264");
     testRecorder(clip, "h264_nvenc");
     testLiveSource();
+    if (argc > 3) testStyledAndBitmapSubtitles(argv[3]);
     testPlayer(clip, true);
     testPlayer(clip, false);
     testTracksAndFormats(argv[2]);

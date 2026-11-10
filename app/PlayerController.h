@@ -64,6 +64,12 @@ public slots:
     void setPlaybackRate(qreal rate);
     void setCurrentIndex(int index);
     void setAudioTrack(int streamIndex);
+    // Next (+1) or previous (-1) chapter; "previous" restarts the current one first
+    // when it has played for a few seconds.
+    void seekChapter(int direction);
+    // A-B loop, one key: the first call sets A at the current position, the second sets B
+    // and starts looping, the third clears it.
+    void cycleLoop();
     // The GPU decoder whose frames the screen shows directly (None: decode on the CPU).
     void setGpuFramePath(viplyr::HwAccel decoder);
     void setSubtitleTrack(int track);  // kSubtitlesOff, kSubtitlesExternalFile or a stream index
@@ -77,7 +83,10 @@ signals:
     void mediaClosed();
     void resumed(qint64 milliseconds);  // playback continued from a remembered position
     void subtitleTextChanged(const QString &text);
+    // Styled (ASS) or bitmap subtitles to draw over the picture; null when there are none.
+    void pictureSubtitlesChanged(std::shared_ptr<const viplyr::SubtitleTrackData> track);
     void errorOccurred(const QString &message);
+    void loopChanged(qint64 startMs, qint64 endMs);  // -1 for a point not set
 
 private:
     struct OpenRequest {
@@ -103,6 +112,7 @@ private:
     void cancelSubtitleLoading();
 
     void rememberPosition();
+    void clearLoop();
     qint64 rememberedPosition(const QString &path) const;
 
     viplyr::Player player_;
@@ -126,5 +136,7 @@ private:
     qint64 lastPosition_ = -1;
     int volume_ = 100;
     viplyr::HwAccel gpuFramePath_ = viplyr::HwAccel::None;
+    qint64 loopStartMs_ = -1;
+    qint64 loopEndMs_ = -1;
     qreal rate_ = 1.0;
 };

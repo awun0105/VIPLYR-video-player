@@ -43,6 +43,13 @@ struct TrackInfo {
     bool isText = false;   // subtitles only: text (readable with readSubtitleTrack) or bitmap
 };
 
+// A named part of the media (a film's scenes, a recording's sections).
+struct Chapter {
+    double start = 0.0;  // seconds, on the same time line as frame pts
+    double end = 0.0;
+    std::string title;   // may be empty
+};
+
 struct MediaInfo {
     std::string url;
     double duration = 0.0;  // seconds, 0 when unknown (live streams)
@@ -60,6 +67,7 @@ struct MediaInfo {
     int audioStreamIndex = -1;     // the audio track being played, -1 when none
     std::vector<TrackInfo> audioTracks;
     std::vector<TrackInfo> subtitleTracks;
+    std::vector<Chapter> chapters;  // in time order; empty when the file has none
 };
 
 }  // namespace viplyr

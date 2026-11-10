@@ -5,6 +5,7 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLWidget>
+#include <QPainter>
 #include <QPointF>
 #include <QTimer>
 #include <atomic>
@@ -13,8 +14,17 @@
 #include "CudaGlInterop.h"
 #include "DmaBufImporter.h"
 #include "OverlayTrack.h"
+#include "SubtitleRenderer.h"
 #include "viplyr/MediaInfo.h"
 #include "viplyr/Sinks.h"
+
+// Picture controls applied while drawing, each from -100 to 100; 0 changes nothing.
+struct PictureAdjustments {
+    int brightness = 0;
+    int contrast = 0;
+    int saturation = 0;
+    int gamma = 0;
+};
 
 // Shows video frames with OpenGL and supports zoom, pan and rotation.
 //
@@ -38,6 +48,12 @@ public:
     static viplyr::HwAccel probeGpuFramePath();
     bool isShowingGpuFrame() const { return shownOnGpu_; }  // drawn straight from the decoder
     double currentFrameTime() const { return shownFrame_.isValid() ? shownFrame_.pts() : 0.0; }
+
+    void setPictureAdjustments(const PictureAdjustments &adjustments);
+    const PictureAdjustments &pictureAdjustments() const { return adjustments_; }
+
+    // Styled (ASS) or bitmap subtitles drawn over the picture; null removes them.
+    void setPictureSubtitles(std::shared_ptr<const viplyr::SubtitleTrackData> track);
 
     // Shapes drawn over the video. The track must outlive the widget or be reset to null.
     void setOverlayTrack(const OverlayTrack *track);
@@ -75,7 +91,8 @@ private:
                      int height, int channels);
     void setColorUniforms(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage);
     void showFrame(const viplyr::VideoFrame &frame, viplyr::PixelFormat storage, bool onGpu);
-    void drawOverlays();
+    void drawVideo(viplyr::VideoFrame &newFrame);
+    void drawOverlays(QPainter &painter);
 
     int rotationDegrees() const { return (mediaRotation_ + userRotation_) % 360; }
     QMatrix4x4 viewTransform() const;
@@ -107,6 +124,8 @@ private:
     QPointF lastDragPosition_;
 
     const OverlayTrack *overlayTrack_ = nullptr;
+    PictureAdjustments adjustments_;
+    SubtitleRenderer pictureSubtitles_;
     QRectF cropPreview_;
 
     QLabel *subtitleLabel_;

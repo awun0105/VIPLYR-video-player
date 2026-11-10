@@ -27,8 +27,10 @@ ThumbnailPopup::ThumbnailPopup(QWidget *parent) : QWidget(parent) {
     layout->addWidget(timeLabel_);
 }
 
-void ThumbnailPopup::setTime(qint64 positionMs) {
-    timeLabel_->setText(MediaFiles::formatTime(positionMs));
+void ThumbnailPopup::setTime(qint64 positionMs, const QString &chapter) {
+    const QString time = MediaFiles::formatTime(positionMs);
+    const QString text = chapter.isEmpty() ? time : time + "  " + chapter;
+    timeLabel_->setText(timeLabel_->fontMetrics().elidedText(text, Qt::ElideRight, width() - 8));
 }
 
 void ThumbnailPopup::setPicture(const QPixmap &pixmap) {

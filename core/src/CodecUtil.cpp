@@ -233,6 +233,15 @@ MediaInfo describeMedia(const AVFormatContext *format, const AVStream *video, co
         if (type == AVMEDIA_TYPE_AUDIO) info.audioTracks.push_back(describeTrack(stream));
         else if (type == AVMEDIA_TYPE_SUBTITLE) info.subtitleTracks.push_back(describeTrack(stream));
     }
+    const double offset = startOffsetSeconds(format, video);
+    for (unsigned i = 0; i < format->nb_chapters; ++i) {
+        const AVChapter *source = format->chapters[i];
+        Chapter chapter;
+        chapter.start = std::max(0.0, toSeconds(source->start, source->time_base) - offset);
+        chapter.end = std::max(chapter.start, toSeconds(source->end, source->time_base) - offset);
+        if (const AVDictionaryEntry *title = av_dict_get(source->metadata, "title", nullptr, 0)) chapter.title = title->value;
+        info.chapters.push_back(chapter);
+    }
     return info;
 }
 
