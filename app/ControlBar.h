@@ -16,6 +16,8 @@ public:
     JumpSlider *seekSlider() const { return seekSlider_; }
     QToolButton *tracksButton() const { return tracksButton_; }  // anchor for the tracks menu
     int volume() const;
+    // The level to bring back next time: the slider's, or the one before muting.
+    int volumeToRemember() const;
     qreal playbackRate() const;
 
 public slots:

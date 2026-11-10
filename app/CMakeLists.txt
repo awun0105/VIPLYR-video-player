@@ -32,6 +32,15 @@ target_compile_options(Viplyr PRIVATE -Wall -Wextra)
 set_target_properties(Viplyr PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 if(VIPLYR_BUILD_TESTS)
+    # Drives the player in a real window (seek, step, snapshot, long playback). Needs a
+    # display, so it is run by hand: build/app/display_tests <video> [seconds].
+    add_executable(display_tests tests/display_tests.cpp
+        AudioOutput.cpp CudaGlInterop.cpp DmaBufImporter.cpp OverlayTrack.cpp
+        PlayerController.cpp SubtitleTrack.cpp VideoWidget.cpp)
+    target_include_directories(display_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(display_tests PRIVATE viplyr_core
+        Qt6::Widgets Qt6::OpenGLWidgets Qt6::Multimedia Qt6::Concurrent ${CMAKE_DL_LIBS})
+
     find_program(FFMPEG_EXECUTABLE ffmpeg)
     if(FFMPEG_EXECUTABLE)
         # Runs real ffmpeg exports built by ExportCommand and checks the results.

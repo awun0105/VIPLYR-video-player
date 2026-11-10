@@ -263,6 +263,11 @@ void testPlayer(const std::string &clip, bool withAudio) {
     player.stepFrame(-1);
     CHECK(waitFor([&] { return near(video.lastPts(), 37 * kFrame, 0.001); }));
     CHECK(player.state() == State::Paused);
+    // Quick presses add up even while the previous step back is still seeking.
+    player.stepFrame(-1);
+    player.stepFrame(-1);
+    player.stepFrame(-1);
+    CHECK(waitFor([&] { return near(video.lastPts(), 34 * kFrame, 0.001); }));
 
     // Double speed: one wall second covers about two media seconds.
     player.seek(0.0);

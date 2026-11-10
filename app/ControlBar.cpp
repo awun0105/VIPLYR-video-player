@@ -124,6 +124,9 @@ void ControlBar::paintEvent(QPaintEvent *) {
 }
 
 int ControlBar::volume() const { return volumeSlider_->value(); }
+int ControlBar::volumeToRemember() const {
+    return volumeSlider_->value() > 0 ? volumeSlider_->value() : volumeBeforeMute_;
+}
 void ControlBar::setVolume(int percent) { volumeSlider_->setValue(percent); }
 qreal ControlBar::playbackRate() const { return speedCombo_->currentData().toDouble(); }
 

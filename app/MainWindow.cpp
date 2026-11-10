@@ -223,7 +223,9 @@ void MainWindow::loadSettings() {
     playlistVisible_ = settings.value(Setting::kPlaylistVisible, true).toBool();
     playlistPanel_->setVisible(playlistVisible_);
 
-    controlBar_->setVolume(settings.value(Setting::kVolume, 100).toInt());
+    // Never start muted: a muted last session is remembered at its level before muting.
+    const int volume = settings.value(Setting::kVolume, 100).toInt();
+    controlBar_->setVolume(volume > 0 && volume <= 100 ? volume : 100);
     controller_->setVolume(controlBar_->volume());
     controlBar_->setPlaybackRate(settings.value(Setting::kRate, 1.0).toDouble());
     controller_->setPlaybackRate(controlBar_->playbackRate());
@@ -231,7 +233,7 @@ void MainWindow::loadSettings() {
 
 void MainWindow::saveSettings() {
     QSettings settings;
-    settings.setValue(Setting::kVolume, controlBar_->volume());
+    settings.setValue(Setting::kVolume, controlBar_->volumeToRemember());
     settings.setValue(Setting::kRate, controlBar_->playbackRate());
     settings.setValue(Setting::kPlaylistVisible, playlistVisible_);
     if (!isFullScreen()) settings.setValue(Setting::kGeometry, saveGeometry());

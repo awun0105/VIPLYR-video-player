@@ -280,8 +280,14 @@ void Player::Impl::stepFrame(int direction) {
     if (direction > 0) {
         ++stepRequests_;
     } else {
-        // Aim at the middle of the previous frame so rounding cannot miss it.
-        seek(lastVideoPts_ - 0.5 * lastVideoDuration_);
+        // Aim at the middle of the previous frame so rounding cannot miss it. While an
+        // earlier step back is still seeking, step from its target, so quick presses add up.
+        double target = lastVideoPts_ - 0.5 * lastVideoDuration_;
+        if (seekPending_) {
+            std::lock_guard<std::mutex> lock(seekMutex_);
+            target = seekTarget_ - lastVideoDuration_;
+        }
+        seek(target);
     }
 }
 
