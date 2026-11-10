@@ -41,12 +41,21 @@ void JumpSlider::setHighlight(int from, int to) {
     update();
 }
 
+void JumpSlider::setRanges(const QVector<QPair<int, int>> &ranges) {
+    ranges_ = ranges;
+    update();
+}
+
 void JumpSlider::paintEvent(QPaintEvent *event) {
     QSlider::paintEvent(event);
-    if (marks_.isEmpty() && highlightFrom_ < 0) return;
+    if (marks_.isEmpty() && highlightFrom_ < 0 && ranges_.isEmpty()) return;
 
     QPainter painter(this);
     const int middle = height() / 2;
+    for (const QPair<int, int> &range : ranges_) {
+        painter.fillRect(QRect(QPoint(xFor(range.first), middle + 3), QPoint(xFor(range.second), middle + 5)),
+                         QColor(80, 220, 120));
+    }
     if (highlightFrom_ >= 0) {
         const QColor loopColor(255, 196, 0);
         const int start = xFor(highlightFrom_);

@@ -1,13 +1,16 @@
 // Runs the ffmpeg commands built by ExportCommand and checks what comes out.
 // Usage: export_tests <test_clip.mp4> <test_tracks.mkv>
 // test_clip.mp4 is 320x240, 3 s, 30 fps, one keyframe per second, with sound.
+#include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <cmath>
 #include <cstdio>
 
 #include "ExportCommand.h"
+#include "ExportJob.h"
 #include "viplyr/FrameReader.h"
 
 namespace {
@@ -40,6 +43,7 @@ bool near(double a, double b, double tolerance) { return std::fabs(a - b) <= tol
 }  // namespace
 
 int main(int argc, char **argv) {
+    QCoreApplication app(argc, argv);  // ExportJob needs an event loop
     if (argc < 3) {
         std::fprintf(stderr, "usage: %s <test_clip.mp4> <test_tracks.mkv>\n", argv[0]);
         return 2;
@@ -53,8 +57,7 @@ int main(int argc, char **argv) {
         ExportOptions options;
         options.inputPath = clip;
         options.outputPath = folder.filePath("copy.mp4");
-        options.startSeconds = 1.0;
-        options.endSeconds = 2.0;
+        options.segments = {{1.0, 2.0}};
         CHECK(!options.needsReencode());
         CHECK(runFfmpeg(options));
         const viplyr::MediaInfo info = inspect(options.outputPath);
@@ -68,8 +71,7 @@ int main(int argc, char **argv) {
         ExportOptions options;
         options.inputPath = clip;
         options.outputPath = folder.filePath("edit.mp4");
-        options.startSeconds = 0.5;
-        options.endSeconds = 1.5;
+        options.segments = {{0.5, 1.5}};
         options.frameAccurateCut = true;
         options.crop = QRect(40, 20, 160, 120);
         options.rotateDegrees = 90;
@@ -112,10 +114,116 @@ int main(int argc, char **argv) {
         options.inputPath = clip;
         options.outputPath = folder.filePath("frames");
         QDir().mkpath(options.outputPath);
-        options.endSeconds = 0.5;
+        options.segments = {{0.0, 0.5}};
         options.output = ExportOptions::Output::ImageSequence;
         CHECK(runFfmpeg(options));
         CHECK(QDir(options.outputPath).entryList({"frame_*.png"}).size() == 15);  // 0.5 s at 30 fps
+    }
+
+    std::printf("joining parts\n");
+    {
+        ExportOptions options;
+        options.inputPath = clip;
+        options.outputPath = folder.filePath("joined.mp4");
+        options.segments = {{0.0, 0.5}, {2.0, 3.0}, {1.0, 1.5}};  // any order
+        CHECK(options.joinsSegments() && options.needsReencode());
+        CHECK(near(options.exportedSeconds(3.0), 2.0, 1e-6));
+        CHECK(runFfmpeg(options));
+        const viplyr::MediaInfo info = inspect(options.outputPath);
+        CHECK(info.audioTracks.size() == 1);
+        CHECK(near(info.duration, 2.0, 0.1));
+        // 15 + 30 + 15 frames, and the third part starts with the clip's frame 30.
+        viplyr::FrameReader reader;
+        reader.open(options.outputPath.toStdString());
+        int frames = 0;
+        viplyr::VideoFrame frame;
+        while (reader.read(frame)) ++frames;
+        CHECK(frames == 60);
+
+        options.audio = ExportOptions::Audio::Remove;  // the picture alone, cropped
+        options.crop = QRect(0, 0, 160, 120);
+        options.outputPath = folder.filePath("joined_silent.mp4");
+        CHECK(runFfmpeg(options));
+        const viplyr::MediaInfo silent = inspect(options.outputPath);
+        CHECK(silent.audioTracks.empty() && silent.width == 160 && near(silent.duration, 2.0, 0.1));
+
+        options.audio = ExportOptions::Audio::Keep;
+        options.inputHasAudio = false;  // a video without sound joins without audio inputs
+        options.crop = QRect();
+        options.outputPath = folder.filePath("joined_no_audio_input.mp4");
+        CHECK(runFfmpeg(options));
+        CHECK(inspect(options.outputPath).audioTracks.empty());
+    }
+
+    for (const auto &[encoder, name] : {std::pair{ExportOptions::Encoder::Nvenc, "nvenc"},
+                                        std::pair{ExportOptions::Encoder::Vaapi, "vaapi"}}) {
+        QProcess probe;
+        probe.start("ffmpeg", encoderProbeArguments(encoder));
+        if (!probe.waitForFinished(20000) || probe.exitCode() != 0) {
+            std::printf("gpu encoder (%s): not available, skipped\n", name);
+            continue;
+        }
+        std::printf("gpu encoder (%s)\n", name);
+        ExportOptions options;
+        options.inputPath = clip;
+        options.outputPath = folder.filePath(QString("gpu_%1.mp4").arg(name));
+        options.segments = {{0.0, 1.0}, {2.0, 3.0}};
+        options.crop = QRect(0, 0, 160, 120);
+        options.encoder = encoder;
+        CHECK(runFfmpeg(options));
+        const viplyr::MediaInfo info = inspect(options.outputPath);
+        CHECK(info.videoCodec == "h264" && info.width == 160 && info.height == 120);
+        CHECK(near(info.duration, 2.0, 0.1));
+    }
+
+    std::printf("export job (progress, finish, cancel)\n");
+    {
+        ExportJob job;
+        double lastProgress = -1.0;
+        int progressUpdates = 0;
+        bool done = false, succeeded = false;
+        QString reportedPath, reportedError;
+        QObject::connect(&job, &ExportJob::progressChanged, [&](double fraction) {
+            lastProgress = fraction;
+            ++progressUpdates;
+        });
+        QObject::connect(&job, &ExportJob::finished, [&](bool ok, const QString &path, const QString &error) {
+            done = true;
+            succeeded = ok;
+            reportedPath = path;
+            reportedError = error;
+        });
+        const auto waitUntilDone = [&] {
+            QElapsedTimer timer;
+            timer.start();
+            while (!done && timer.elapsed() < 60000) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        };
+
+        ExportOptions options;
+        options.inputPath = clip;
+        options.outputPath = folder.filePath("job.mp4");
+        options.segments = {{0.0, 1.0}, {2.0, 3.0}};
+        job.start(options, options.exportedSeconds(3.0));
+        CHECK(job.isRunning());
+        waitUntilDone();
+        CHECK(done && succeeded && reportedError.isEmpty() && reportedPath == options.outputPath);
+        CHECK(lastProgress == 1.0 && progressUpdates >= 2);
+        CHECK(near(inspect(options.outputPath).duration, 2.0, 0.1));
+
+        done = false;  // a failing export reports ffmpeg's message
+        options.outputPath = folder.filePath("no_such_folder/job.mp4");
+        job.start(options, 2.0);
+        waitUntilDone();
+        CHECK(done && !succeeded && !reportedError.isEmpty());
+
+        done = false;  // cancelling reports neither success nor an error
+        options.outputPath = folder.filePath("cancelled.mp4");
+        options.segments = {};
+        options.frameAccurateCut = true;
+        job.start(options, 3.0);
+        job.cancel();
+        waitUntilDone();
+        CHECK(done && !succeeded && reportedError.isEmpty() && !job.isRunning());
     }
 
     std::printf("centred crop\n");

@@ -70,6 +70,9 @@ public slots:
     // A-B loop, one key: the first call sets A at the current position, the second sets B
     // and starts looping, the third clears it.
     void cycleLoop();
+    // Plays the given parts (milliseconds) one after another, then pauses. Any seek by
+    // the user ends the preview.
+    void previewSegments(const QVector<QPair<qint64, qint64>> &segments);
     // The GPU decoder whose frames the screen shows directly (None: decode on the CPU).
     void setGpuFramePath(viplyr::HwAccel decoder);
     void setSubtitleTrack(int track);  // kSubtitlesOff, kSubtitlesExternalFile or a stream index
@@ -113,6 +116,7 @@ private:
 
     void rememberPosition();
     void clearLoop();
+    void jumpTo(qint64 milliseconds);  // a seek of our own: keeps the preview going
     qint64 rememberedPosition(const QString &path) const;
 
     viplyr::Player player_;
@@ -136,6 +140,8 @@ private:
     qint64 lastPosition_ = -1;
     int volume_ = 100;
     viplyr::HwAccel gpuFramePath_ = viplyr::HwAccel::None;
+    QVector<QPair<qint64, qint64>> previewSegments_;
+    int previewIndex_ = -1;  // the part being previewed, -1 when not previewing
     qint64 loopStartMs_ = -1;
     qint64 loopEndMs_ = -1;
     qreal rate_ = 1.0;

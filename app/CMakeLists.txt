@@ -11,6 +11,7 @@ add_executable(Viplyr
     DmaBufImporter.cpp
     ExportCommand.cpp
     ExportDialog.cpp
+    ExportJob.cpp
     Icons.cpp
     IdleInhibitor.cpp
     JumpSlider.cpp
@@ -47,9 +48,9 @@ if(VIPLYR_BUILD_TESTS)
     find_program(FFMPEG_EXECUTABLE ffmpeg)
     if(FFMPEG_EXECUTABLE)
         # Runs real ffmpeg exports built by ExportCommand and checks the results.
-        add_executable(export_tests tests/export_tests.cpp ExportCommand.cpp)
+        add_executable(export_tests tests/export_tests.cpp ExportCommand.cpp ExportJob.cpp)
         target_include_directories(export_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-        target_link_libraries(export_tests PRIVATE viplyr_core Qt6::Core Qt6::Gui)
+        target_link_libraries(export_tests PRIVATE viplyr_core Qt6::Core Qt6::Gui Qt6::Concurrent)
         add_test(NAME export_tests COMMAND export_tests
                  ${CMAKE_BINARY_DIR}/core/test_clip.mp4 ${CMAKE_BINARY_DIR}/core/test_tracks.mkv)
         add_dependencies(export_tests core_tests)  # the clips are generated for core_tests

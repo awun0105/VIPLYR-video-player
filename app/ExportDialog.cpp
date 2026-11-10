@@ -10,12 +10,14 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
-#include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStandardPaths>
 
+#include "ExportJob.h"
+#include "MediaFiles.h"
 #include "Theme.h"
 
 namespace {
@@ -30,37 +32,36 @@ const char *kDialogStyle =
     "border: 1px solid #34343c; border-radius: 5px; padding: 4px 6px; } "
     "QComboBox QAbstractItemView { background-color: #24242a; color: white; "
     "selection-background-color: #3D9BFF; } "
-    "QProgressBar { background-color: #24242a; border: none; border-radius: 5px; height: 10px; "
-    "text-align: center; color: white; } QProgressBar::chunk { background-color: #3D9BFF; border-radius: 5px; }";
+    "QListWidget { background-color: #24242a; color: white; border: 1px solid #34343c; border-radius: 5px; } "
+    "QListWidget::item:selected { background-color: #3D9BFF; }";
+
+QString describeSegment(const ExportOptions::Segment &segment, double durationSeconds) {
+    const double end = segment.endSeconds > 0.0 ? segment.endSeconds : durationSeconds;
+    return QString("%1  -  %2   (%3 s)")
+        .arg(MediaFiles::formatTimePrecise(qRound64(segment.startSeconds * 1000.0)),
+             MediaFiles::formatTimePrecise(qRound64(end * 1000.0)))
+        .arg(end - segment.startSeconds, 0, 'f', 2);
+}
 
 }  // namespace
 
 ExportDialog::ExportDialog(const QString &videoPath, double durationSeconds, int pictureWidth,
-                           int pictureHeight, QWidget *parent)
+                           int pictureHeight, bool hasAudio, QWidget *parent)
     : QDialog(parent), videoPath_(videoPath), durationSeconds_(durationSeconds),
-      pictureWidth_(pictureWidth), pictureHeight_(pictureHeight) {
+      pictureWidth_(pictureWidth), pictureHeight_(pictureHeight), hasAudio_(hasAudio) {
     setWindowTitle("Edit and export - " + QFileInfo(videoPath).fileName());
     setStyleSheet(kDialogStyle);
     setAttribute(Qt::WA_DeleteOnClose);
     buildForm();
     refreshSummary();
-
-    process_.setProgram("ffmpeg");
-    connect(&process_, &QProcess::readyReadStandardOutput, this, &ExportDialog::readProgress);
-    connect(&process_, &QProcess::finished, this, &ExportDialog::onProcessFinished);
-    connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart) return;
-        setRunning(false);
-        QMessageBox::critical(this, "Export", "ffmpeg could not be started. Is it installed?");
+    ExportJob::detectGpuEncoders().then(this, [this](const QVector<ExportOptions::Encoder> &encoders) {
+        addGpuEncoders(encoders);
     });
 }
 
 ExportDialog::~ExportDialog() {
-    if (process_.state() != QProcess::NotRunning) {
-        process_.kill();
-        process_.waitForFinished(2000);
-    }
     emit cropChanged(QRectF());
+    emit segmentsChanged({});
 }
 
 void ExportDialog::buildForm() {
@@ -89,6 +90,31 @@ void ExportDialog::buildForm() {
 
     startSpin_ = timeSpin(0.0);
     endSpin_ = timeSpin(durationSeconds_);
+
+    // Parts to keep, joined in list order. With none listed, Start-End is exported.
+    segmentList_ = new QListWidget;
+    segmentList_->setMaximumHeight(110);
+    QPushButton *addSegmentButton = new QPushButton("Add Start-End as a part");
+    removeSegmentButton_ = new QPushButton("Remove part");
+    QPushButton *previewButton = new QPushButton("Preview");
+    previewButton->setToolTip("Plays the parts one after another in the player");
+    for (QPushButton *button : {addSegmentButton, removeSegmentButton_, previewButton}) button->setStyleSheet(Theme::Button);
+    QHBoxLayout *segmentButtons = new QHBoxLayout;
+    segmentButtons->addWidget(addSegmentButton);
+    segmentButtons->addWidget(removeSegmentButton_);
+    segmentButtons->addStretch(1);
+    segmentButtons->addWidget(previewButton);
+    connect(addSegmentButton, &QPushButton::clicked, this, &ExportDialog::addSegment);
+    connect(removeSegmentButton_, &QPushButton::clicked, this, [this] {
+        const int row = segmentList_->currentRow();
+        if (row < 0) return;
+        segments_.removeAt(row);
+        delete segmentList_->takeItem(row);
+        refreshSummary();
+    });
+    connect(segmentList_, &QListWidget::currentRowChanged, this, &ExportDialog::refreshSummary);
+    connect(previewButton, &QPushButton::clicked, this, [this] { emit previewRequested(currentSegments()); });
+
     accurateCheck_ = new QCheckBox("Cut on the exact frame (slower: re-encodes the video)");
     connect(accurateCheck_, &QCheckBox::toggled, this, &ExportDialog::refreshSummary);
 
@@ -130,6 +156,10 @@ void ExportDialog::buildForm() {
         rotateCombo_->addItem(degrees == 0 ? "No rotation" : QString("%1° clockwise").arg(degrees), degrees);
     }
 
+    // GPU encoders are added once a quick test shows they work here.
+    encoderCombo_ = new QComboBox;
+    encoderCombo_->addItem("CPU (x264): best quality per size", static_cast<int>(ExportOptions::Encoder::Cpu));
+
     outputCombo_ = new QComboBox;
     outputCombo_->addItem("Video file (.mp4)", static_cast<int>(ExportOptions::Output::Video));
     outputCombo_->addItem("Image sequence (one PNG per frame)",
@@ -137,36 +167,31 @@ void ExportDialog::buildForm() {
 
     summaryLabel_ = new QLabel;
     summaryLabel_->setWordWrap(true);
-    progressBar_ = new QProgressBar;
-    progressBar_->setRange(0, 1000);
-    progressBar_->hide();
 
     exportButton_ = new QPushButton("Export...");
     exportButton_->setStyleSheet(Theme::Button);
-    cancelButton_ = new QPushButton("Cancel export");
-    cancelButton_->setStyleSheet(Theme::Button);
-    cancelButton_->hide();
     QHBoxLayout *buttonRow = new QHBoxLayout;
     buttonRow->addStretch(1);
-    buttonRow->addWidget(cancelButton_);
     buttonRow->addWidget(exportButton_);
 
     QFormLayout *form = new QFormLayout(this);
     form->setVerticalSpacing(10);
     form->addRow("Start", timeRow(startSpin_));
     form->addRow("End", timeRow(endSpin_));
+    form->addRow("Parts", segmentList_);
+    form->addRow("", segmentButtons);
     form->addRow("", accurateCheck_);
     form->addRow("Sound", audioCombo_);
     form->addRow("", audioFileRow);
     form->addRow("Crop", cropCombo_);
     form->addRow("", cropRow);
     form->addRow("Rotate", rotateCombo_);
+    form->addRow("Encoder", encoderCombo_);
     form->addRow("Save as", outputCombo_);
     form->addRow(summaryLabel_);
-    form->addRow(progressBar_);
     form->addRow(buttonRow);
 
-    for (QComboBox *combo : {audioCombo_, cropCombo_, rotateCombo_, outputCombo_}) {
+    for (QComboBox *combo : {audioCombo_, cropCombo_, rotateCombo_, encoderCombo_, outputCombo_}) {
         connect(combo, &QComboBox::currentIndexChanged, this, &ExportDialog::refreshSummary);
     }
     connect(audioBrowseButton_, &QPushButton::clicked, this, [this] {
@@ -175,7 +200,36 @@ void ExportDialog::buildForm() {
         if (!path.isEmpty()) audioPathEdit_->setText(path);
     });
     connect(exportButton_, &QPushButton::clicked, this, &ExportDialog::startExport);
-    connect(cancelButton_, &QPushButton::clicked, &process_, &QProcess::kill);
+}
+
+void ExportDialog::addGpuEncoders(const QVector<ExportOptions::Encoder> &encoders) {
+    for (ExportOptions::Encoder encoder : encoders) {
+        const QString name = encoder == ExportOptions::Encoder::Nvenc ? "NVIDIA GPU (NVENC): fast"
+                                                                      : "Intel/AMD GPU (VAAPI): fast";
+        encoderCombo_->addItem(name, static_cast<int>(encoder));
+    }
+}
+
+void ExportDialog::addSegment() {
+    ExportOptions::Segment segment;
+    segment.startSeconds = startSpin_->value();
+    segment.endSeconds = endSpin_->value();
+    if (segment.endSeconds <= segment.startSeconds) {
+        QMessageBox::information(this, "Parts", "End must be after Start.");
+        return;
+    }
+    segments_.append(segment);
+    segmentList_->addItem(describeSegment(segment, durationSeconds_));
+    refreshSummary();
+}
+
+QVector<ExportOptions::Segment> ExportDialog::currentSegments() const {
+    if (!segments_.isEmpty()) return segments_;
+    // An end at the very end means "until the end", which also lets ffmpeg copy the tail exactly.
+    ExportOptions::Segment whole;
+    whole.startSeconds = startSpin_->value();
+    whole.endSeconds = endSpin_->value() >= durationSeconds_ - 0.001 ? 0.0 : endSpin_->value();
+    return {whole};
 }
 
 QRect ExportDialog::currentCrop() const {
@@ -192,9 +246,12 @@ QRect ExportDialog::currentCrop() const {
 ExportOptions ExportDialog::currentOptions() const {
     ExportOptions options;
     options.inputPath = videoPath_;
-    options.startSeconds = startSpin_->value();
-    // An end at the very end means "until the end", which also lets ffmpeg copy the tail exactly.
-    options.endSeconds = endSpin_->value() >= durationSeconds_ - 0.001 ? 0.0 : endSpin_->value();
+    options.segments = currentSegments();
+    if (options.segments.size() == 1 && options.segments[0].startSeconds <= 0.0 && options.segments[0].endSeconds <= 0.0) {
+        options.segments.clear();  // the whole video
+    }
+    options.inputHasAudio = hasAudio_;
+    options.encoder = static_cast<ExportOptions::Encoder>(encoderCombo_->currentData().toInt());
     options.frameAccurateCut = accurateCheck_->isChecked();
     options.audio = static_cast<ExportOptions::Audio>(audioCombo_->currentData().toInt());
     options.replacementAudioPath = audioPathEdit_->text();
@@ -213,14 +270,18 @@ void ExportDialog::refreshSummary() {
     const bool customCrop = cropCombo_->currentData().toDouble() == kCustomCrop;
     for (QSpinBox *spin : cropSpins_) spin->setEnabled(customCrop);
 
+    removeSegmentButton_->setEnabled(segmentList_->currentRow() >= 0);
     const double length = options.exportedSeconds(durationSeconds_);
-    const QString speed = options.needsReencode()
-                              ? "The video will be re-encoded, which takes a while."
-                              : "Fast export without quality loss. The start snaps to the nearest keyframe.";
+    QString speed = options.needsReencode()
+                        ? "The video will be re-encoded, which takes a while."
+                        : "Fast export without quality loss. The start snaps to the nearest keyframe.";
+    if (options.joinsSegments()) speed = QString("%1 parts joined in list order. ").arg(options.segments.size()) + speed;
     summaryLabel_->setText(QString("Length: %1 s. %2").arg(length, 0, 'f', 2).arg(speed));
-    exportButton_->setEnabled(length > 0.0 && process_.state() == QProcess::NotRunning);
+    exportButton_->setEnabled(length > 0.0 && !exportRunning_);
+    exportButton_->setText(exportRunning_ ? "Another export is running" : "Export...");
 
     emit cropChanged(options.crop.isNull() ? QRectF() : QRectF(options.crop));
+    emit segmentsChanged(currentSegments());
 }
 
 void ExportDialog::startExport() {
@@ -244,38 +305,10 @@ void ExportDialog::startExport() {
         return;
     }
 
-    runningOptions_ = options;
-    progressBar_->setValue(0);
-    setRunning(true);
-    process_.setArguments(buildFfmpegArguments(options));
-    process_.start();
+    emit exportRequested(options, options.exportedSeconds(durationSeconds_));
 }
 
-void ExportDialog::readProgress() {
-    // ffmpeg -progress prints "key=value" lines; out_time_us is the time written so far.
-    const double total = runningOptions_.exportedSeconds(durationSeconds_);
-    while (process_.canReadLine()) {
-        const QByteArray line = process_.readLine().trimmed();
-        if (!line.startsWith("out_time_us=") || total <= 0.0) continue;
-        const double written = line.mid(qstrlen("out_time_us=")).toDouble() / 1e6;
-        progressBar_->setValue(static_cast<int>(qBound(0.0, written / total, 1.0) * 1000));
-    }
-}
-
-void ExportDialog::onProcessFinished(int exitCode, QProcess::ExitStatus status) {
-    setRunning(false);
-    if (status == QProcess::CrashExit) return;  // cancelled by the user
-    if (exitCode != 0) {
-        const QString details = QString::fromLocal8Bit(process_.readAllStandardError()).right(600);
-        QMessageBox::critical(this, "Export failed", details.isEmpty() ? "ffmpeg reported an error." : details);
-        return;
-    }
-    progressBar_->setValue(progressBar_->maximum());
-    emit exportFinished(runningOptions_.outputPath);
-}
-
-void ExportDialog::setRunning(bool running) {
-    progressBar_->setVisible(running || progressBar_->value() > 0);
-    cancelButton_->setVisible(running);
-    exportButton_->setEnabled(!running);
+void ExportDialog::setExportRunning(bool running) {
+    exportRunning_ = running;
+    refreshSummary();
 }

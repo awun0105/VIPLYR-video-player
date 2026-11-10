@@ -66,7 +66,9 @@ Viplyr/
 
 ### ✂️ Edit & Export
 - **Trim**, **crop** (16:9, 9:16, 1:1, 4:3 or custom), **rotate**, **remove or replace the sound**.
-- Trimming and sound changes are exported without re-encoding (fast, no quality loss); crop, rotation and frame-exact cuts re-encode with a progress bar.
+- **Cut out several parts and join them**: list the parts, see them on the seek bar, preview them back to back, export them as one video.
+- Trimming and sound changes are exported without re-encoding (fast, no quality loss); crop, rotation, joins and frame-exact cuts re-encode, on the CPU (x264) or on the GPU (NVENC, VAAPI) when the machine has one.
+- Exports run in the background with their progress shown over the video, so playback goes on meanwhile.
 - Export a range as a **PNG image sequence**, or save the current frame as an image.
 
 ### 🤖 For Robotics & Computer Vision

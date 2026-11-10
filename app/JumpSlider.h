@@ -12,6 +12,8 @@ public:
     void setMarks(const QVector<int> &values);
     // Highlights from..to; `to` < 0 marks `from` alone; `from` < 0 shows nothing.
     void setHighlight(int from, int to);
+    // Ranges drawn under the groove (the parts an export keeps).
+    void setRanges(const QVector<QPair<int, int>> &ranges);
 
 signals:
     void hoverValueChanged(int value);
@@ -30,4 +32,5 @@ private:
     QVector<int> marks_;
     int highlightFrom_ = -1;
     int highlightTo_ = -1;
+    QVector<QPair<int, int>> ranges_;
 };

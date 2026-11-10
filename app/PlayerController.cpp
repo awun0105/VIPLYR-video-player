@@ -221,6 +221,7 @@ void PlayerController::waitForOpenTask() {
 
 void PlayerController::closeMedia() {
     clearLoop();
+    previewIndex_ = -1;
     cancelSubtitleLoading();
     waitForOpenTask();
     rememberPosition();
@@ -237,10 +238,16 @@ void PlayerController::closeMedia() {
 void PlayerController::handleEnded() {
     if (isOpening_ || player_.state() != viplyr::State::Ended) return;  // a newer video took over
     if (loopEndMs_ >= 0) {  // B at the very end of the video
-        seekTo(loopStartMs_);
+        jumpTo(loopStartMs_);
         play();
         return;
     }
+    if (previewIndex_ >= 0 && previewIndex_ + 1 < previewSegments_.size()) {  // a part running to the end
+        jumpTo(previewSegments_[++previewIndex_].first);
+        play();
+        return;
+    }
+    previewIndex_ = -1;
     QSettings().remove(resumeKey(openPath_));  // watched to the end: start over next time
     if (playlist_.next()) openCurrent(true);
 }
@@ -289,6 +296,14 @@ void PlayerController::seekChapter(int direction) {
     if (direction < 0 && now - chapters[current].start > kRestartThresholdMs / 1000.0) target = current;
     if (target < 0 || target >= static_cast<int>(chapters.size())) return;
     seekTo(static_cast<qint64>(chapters[target].start * 1000.0));
+}
+
+void PlayerController::previewSegments(const QVector<QPair<qint64, qint64>> &segments) {
+    if (!hasMedia() || segments.isEmpty()) return;
+    previewSegments_ = segments;
+    previewIndex_ = 0;
+    jumpTo(segments.first().first);
+    play();
 }
 
 void PlayerController::cycleLoop() {
@@ -385,6 +400,11 @@ void PlayerController::stop() {
 }
 
 void PlayerController::seekTo(qint64 milliseconds) {
+    previewIndex_ = -1;  // the user took over
+    jumpTo(milliseconds);
+}
+
+void PlayerController::jumpTo(qint64 milliseconds) {
     if (!hasMedia()) return;
     player_.seek(milliseconds / 1000.0);
     refreshPosition();
@@ -418,8 +438,17 @@ qint64 PlayerController::duration() const { return hasMedia() ? qRound64(player_
 
 void PlayerController::refreshPosition() {
     const qint64 current = position();
+    if (previewIndex_ >= 0 && isPlaying() && current >= previewSegments_[previewIndex_].second) {
+        if (++previewIndex_ < previewSegments_.size()) {
+            jumpTo(previewSegments_[previewIndex_].first);
+        } else {
+            previewIndex_ = -1;
+            pause();
+        }
+        return;
+    }
     if (loopEndMs_ >= 0 && current >= loopEndMs_ && isPlaying()) {
-        seekTo(loopStartMs_);
+        jumpTo(loopStartMs_);
         return;
     }
     if (current == lastPosition_) return;

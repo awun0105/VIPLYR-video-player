@@ -4,11 +4,14 @@
 #include <QTimer>
 #include <QWidget>
 
+#include "ExportCommand.h"
 #include "IdleInhibitor.h"
 #include "OverlayTrack.h"
 
 class ControlBar;
 class ExportDialog;
+class ExportJob;
+class QProgressBar;
 class PlayerController;
 class PlaylistPanel;
 class QPropertyAnimation;
@@ -61,6 +64,8 @@ private:
     // Tools
     void showTracksMenu();
     void openExportDialog();
+    void startExport(const ExportOptions &options, double totalSeconds);
+    void createExportProgress();
     void saveSnapshot();
     void askForFrame();
     void updateInfo(double frameSeconds);
@@ -89,6 +94,9 @@ private:
     PlaylistPanel *playlistPanel_;
     ThumbnailPopup *thumbnailPopup_;
     QPointer<ExportDialog> exportDialog_;
+    ExportJob *exportJob_ = nullptr;
+    QWidget *exportProgress_ = nullptr;  // shown over the video while an export runs
+    QProgressBar *exportProgressBar_ = nullptr;
     QPropertyAnimation *chromeFade_;
 
     QTimer hideTimer_;

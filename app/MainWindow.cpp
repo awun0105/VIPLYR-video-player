@@ -10,8 +10,10 @@
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProgressBar>
 #include <QPropertyAnimation>
 #include <QSettings>
 #include <QShortcut>
@@ -23,6 +25,7 @@
 
 #include "ControlBar.h"
 #include "ExportDialog.h"
+#include "ExportJob.h"
 #include "JumpSlider.h"
 #include "MediaFiles.h"
 #include "PlayerController.h"
@@ -66,6 +69,7 @@ MainWindow::MainWindow(QWidget *parent) : QWidget(parent) {
 
     controller_ = new PlayerController(this);
     thumbnails_ = new ThumbnailProvider(this);
+    exportJob_ = new ExportJob(this);
 
     buildLayout();
     controller_->addVideoSink(videoWidget_);
@@ -119,6 +123,54 @@ void MainWindow::buildLayout() {
     layout->addWidget(stack_);
 
     thumbnailPopup_ = new ThumbnailPopup(this);
+    createExportProgress();
+}
+
+void MainWindow::createExportProgress() {
+    // A small panel over the video: the export runs on while the player is used.
+    exportProgress_ = new QWidget(videoWidget_);
+    exportProgress_->setAttribute(Qt::WA_StyledBackground);
+    exportProgress_->setStyleSheet("background-color: rgba(0, 0, 0, 170); border-radius: 6px;");
+    QLabel *label = new QLabel("Exporting");
+    label->setStyleSheet("color: white; font-weight: bold; background: transparent;");
+    exportProgressBar_ = new QProgressBar;
+    exportProgressBar_->setRange(0, 1000);
+    exportProgressBar_->setFixedWidth(140);
+    exportProgressBar_->setStyleSheet(
+        "QProgressBar { background-color: #2a2a30; border: none; border-radius: 4px; height: 8px; color: white; "
+        "text-align: center; font-size: 10px; } QProgressBar::chunk { background-color: #3D9BFF; border-radius: 4px; }");
+    QToolButton *cancel = new QToolButton;
+    cancel->setText("Cancel");
+    cancel->setStyleSheet(Theme::OverlayButton);
+    QHBoxLayout *row = new QHBoxLayout(exportProgress_);
+    row->setContentsMargins(10, 6, 6, 6);
+    row->addWidget(label);
+    row->addWidget(exportProgressBar_);
+    row->addWidget(cancel);
+    exportProgress_->hide();
+
+    connect(cancel, &QToolButton::clicked, exportJob_, &ExportJob::cancel);
+    connect(exportJob_, &ExportJob::progressChanged, this,
+            [this](double fraction) { exportProgressBar_->setValue(qRound(fraction * 1000)); });
+    connect(exportJob_, &ExportJob::finished, this,
+            [this](bool succeeded, const QString &outputPath, const QString &error) {
+                exportProgress_->hide();
+                if (exportDialog_) exportDialog_->setExportRunning(false);
+                if (succeeded) videoWidget_->showMessage("Exported " + QFileInfo(outputPath).fileName());
+                else if (error.isEmpty()) videoWidget_->showMessage("Export cancelled");
+                else QMessageBox::critical(this, "Export failed", error);
+            });
+}
+
+void MainWindow::startExport(const ExportOptions &options, double totalSeconds) {
+    if (exportJob_->isRunning()) return;
+    exportJob_->start(options, totalSeconds);
+    if (exportDialog_) exportDialog_->setExportRunning(true);
+    exportProgressBar_->setValue(0);
+    exportProgress_->adjustSize();
+    exportProgress_->show();
+    exportProgress_->raise();
+    layoutControlBar();
 }
 
 void MainWindow::wireConnections() {
@@ -456,16 +508,39 @@ void MainWindow::openExportDialog() {
     const int pictureWidth = sideways ? info.height : info.width;
     const int pictureHeight = sideways ? info.width : info.height;
 
-    exportDialog_ = new ExportDialog(path, info.duration, pictureWidth, pictureHeight, this);
+    exportDialog_ = new ExportDialog(path, info.duration, pictureWidth, pictureHeight, info.hasAudio, this);
+    exportDialog_->setExportRunning(exportJob_->isRunning());
     exportDialog_->setPositionProvider([this] { return videoWidget_->currentFrameTime(); });
     // The crop outline is drawn in the file's own pixel grid, which only matches
     // what the dialog edits when the file carries no rotation.
     if (info.rotationDegrees == 0) {
         connect(exportDialog_, &ExportDialog::cropChanged, videoWidget_, &VideoWidget::setCropPreview);
     }
-    connect(exportDialog_, &ExportDialog::exportFinished, this, [this](const QString &outputPath) {
-        videoWidget_->showMessage("Exported " + QFileInfo(outputPath).fileName());
-    });
+    connect(exportDialog_, &ExportDialog::exportRequested, this, &MainWindow::startExport);
+    const double duration = info.duration;
+    // Segments in milliseconds, with "until the end" made explicit.
+    const auto toMilliseconds = [duration](const QVector<ExportOptions::Segment> &segments) {
+        QVector<QPair<qint64, qint64>> result;
+        for (const ExportOptions::Segment &segment : segments) {
+            const double end = segment.endSeconds > 0.0 ? segment.endSeconds : duration;
+            result.append({qRound64(segment.startSeconds * 1000.0), qRound64(end * 1000.0)});
+        }
+        return result;
+    };
+    connect(exportDialog_, &ExportDialog::segmentsChanged, this,
+            [this, toMilliseconds](const QVector<ExportOptions::Segment> &segments) {
+                QVector<QPair<int, int>> ranges;
+                for (const auto &range : toMilliseconds(segments)) ranges.append({int(range.first), int(range.second)});
+                // The whole video is no selection worth showing.
+                if (ranges.size() == 1 && ranges[0].first == 0 && ranges[0].second >= controlBar_->seekSlider()->maximum() - 1) {
+                    ranges.clear();
+                }
+                controlBar_->seekSlider()->setRanges(ranges);
+            });
+    connect(exportDialog_, &ExportDialog::previewRequested, this,
+            [this, toMilliseconds](const QVector<ExportOptions::Segment> &segments) {
+                controller_->previewSegments(toMilliseconds(segments));
+            });
     exportDialog_->show();
 }
 
@@ -575,6 +650,10 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 void MainWindow::layoutControlBar() {
     const int barHeight = controlBar_->sizeHint().height();
     controlBar_->setGeometry(0, videoWidget_->height() - barHeight, videoWidget_->width(), barHeight);
+    if (exportProgress_) {
+        exportProgress_->move(videoWidget_->width() - exportProgress_->width() - 14,
+                              videoWidget_->height() - barHeight - exportProgress_->height() - 10);
+    }
     videoWidget_->setBottomInset(chromeVisible_ ? barHeight : 0);
 }
 
