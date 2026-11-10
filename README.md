@@ -129,6 +129,12 @@ sudo apt install build-essential cmake ninja-build pkg-config \
 
 Qt 6.4 or newer and FFmpeg 6.1 or newer are required. `make test` runs the engine's headless tests.
 
+With an audio server and output device available, run `./build/app/audio_output_tests`
+to check that audio continues while the GUI event loop is blocked, plus pause, flush
+and shutdown. It mutes its own stream and leaves the system volume unchanged.
+Pass `build/core/test_clip.mp4` as an argument to also check playback, pause, seek,
+speed changes and end-of-stream through the real audio backend.
+
 When the screen can take GPU frames directly, the player decodes on the GPU and draws each frame without copying it through system memory: VAAPI frames are imported as DMA-BUF through EGL (Intel/AMD), NVDEC frames are copied GPU-to-GPU through CUDA/OpenGL interop (when OpenGL runs on the NVIDIA GPU). 4K 60 fps then takes about 10–15% of one CPU core instead of 1–2.5 cores. Otherwise it decodes on the CPU, which beats decoding on the GPU and reading the frames back. The start-up line `Viplyr: GPU frames shown without a CPU copy: ...` tells which path is in use. `VIPLYR_HWACCEL=none|vaapi|cuda` forces a decoder (frames then go through system memory). Editing needs the `ffmpeg` program.
 
 ### Build & Install

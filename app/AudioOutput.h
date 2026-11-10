@@ -1,7 +1,6 @@
 #pragma once
-#include <QAudioSink>
-#include <QIODevice>
-#include <memory>
+#include <QObject>
+#include <QThread>
 #include <mutex>
 #include <vector>
 
@@ -10,14 +9,14 @@
 // Plays the engine's audio through the default output device.
 //
 // The engine writes samples from its own thread into a small ring buffer; Qt's
-// audio backend pulls them out again through read().
-class AudioOutput : public QIODevice, public viplyr::IAudioSink {
+// audio backend pulls them out on a dedicated Qt thread, independently of GUI work.
+class AudioOutput : public QObject, public viplyr::IAudioSink {
     Q_OBJECT
 public:
     explicit AudioOutput(QObject *parent = nullptr);
     ~AudioOutput() override;
 
-    bool isAvailable() const { return sink_ != nullptr; }
+    bool isAvailable() const { return available_; }
     void setVolume(qreal volume);  // 0.0 .. 1.0, perceptual scale
 
     // viplyr::IAudioSink
@@ -27,15 +26,14 @@ public:
     void flush() override;
     void setPaused(bool paused) override;
 
-protected:
-    // QIODevice: called by the audio backend when it wants more samples.
-    qint64 readData(char *data, qint64 maxSize) override;
-    qint64 writeData(const char *, qint64) override { return 0; }
-
 private:
+    class Device;
+    qint64 readData(char *data, qint64 maxSize);
     size_t bufferedFrames() const;  // call with mutex_ held
 
-    std::unique_ptr<QAudioSink> sink_;
+    QThread audioThread_;
+    Device *device_ = nullptr;  // pull device and sink live on audioThread_
+    bool available_ = false;
     viplyr::AudioFormat format_;
     double deviceLatencySeconds_ = 0.0;
 
