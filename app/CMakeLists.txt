@@ -12,6 +12,9 @@ add_executable(Viplyr
     ExportCommand.cpp
     ExportDialog.cpp
     ExportJob.cpp
+    EditProject.cpp
+    EditTimeline.cpp
+    EditorDialog.cpp
     Icons.cpp
     IdleInhibitor.cpp
     JumpSlider.cpp
@@ -36,6 +39,23 @@ target_compile_options(Viplyr PRIVATE -Wall -Wextra)
 set_target_properties(Viplyr PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 if(VIPLYR_BUILD_TESTS)
+    add_executable(edit_tests tests/edit_tests.cpp EditProject.cpp)
+    target_include_directories(edit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(edit_tests PRIVATE viplyr_core Qt6::Core Qt6::Gui)
+    add_test(NAME edit_tests COMMAND edit_tests)
+
+    find_package(Qt6 6.4 QUIET COMPONENTS Test)
+    if(TARGET Qt6::Test)
+        # Needs a display. Exercises handles, split/undo, drops, persistence and multi-source preview.
+        add_executable(editor_ui_tests tests/editor_ui_tests.cpp
+            EditorDialog.cpp EditTimeline.cpp EditProject.cpp MediaFiles.cpp ExportCommand.cpp ExportJob.cpp
+            AudioOutput.cpp CudaGlInterop.cpp DmaBufImporter.cpp OverlayTrack.cpp
+            PlayerController.cpp SubtitleRenderer.cpp SubtitleTrack.cpp VideoWidget.cpp)
+        target_include_directories(editor_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_link_libraries(editor_ui_tests PRIVATE viplyr_core Qt6::Test Qt6::Widgets Qt6::OpenGLWidgets
+            Qt6::Multimedia Qt6::Concurrent PkgConfig::LIBASS ${CMAKE_DL_LIBS})
+    endif()
+
     # Real audio-backend regression test. Run by hand: it needs an output device,
     # but mutes its own stream and never changes the system volume.
     add_executable(audio_output_tests tests/audio_output_tests.cpp AudioOutput.cpp)

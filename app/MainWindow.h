@@ -10,6 +10,7 @@
 
 class ControlBar;
 class ExportDialog;
+class EditorDialog;
 class ExportJob;
 class QProgressBar;
 class PlayerController;
@@ -64,6 +65,7 @@ private:
     // Tools
     void showTracksMenu();
     void openExportDialog();
+    void openVideoEditor();
     void startExport(const ExportOptions &options, double totalSeconds);
     void createExportProgress();
     void saveSnapshot();
@@ -94,6 +96,7 @@ private:
     PlaylistPanel *playlistPanel_;
     ThumbnailPopup *thumbnailPopup_;
     QPointer<ExportDialog> exportDialog_;
+    QPointer<EditorDialog> editorDialog_;
     ExportJob *exportJob_ = nullptr;
     QWidget *exportProgress_ = nullptr;  // shown over the video while an export runs
     QProgressBar *exportProgressBar_ = nullptr;

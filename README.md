@@ -65,6 +65,9 @@ Viplyr/
 - **Zoom, Pan, Rotate, Always on Top**, and the desktop stays awake while a video plays.
 
 ### ✂️ Edit & Export
+- **Timeline editor** (`E` or `Ctrl+E`): filmstrip thumbnails, yellow trim handles, a draggable playhead and split (`B`), duplicate/delete, drag clips to reorder, and drop local videos between clips to insert them. One video track with each clip's original sound; edits leave source files untouched.
+- **Undo/Redo and projects**: `Ctrl+Z` / `Ctrl+Shift+Z`, save with `Ctrl+S` to `.viplyr.json` and reopen with `Ctrl+O`. Projects reference the original source paths; keep those files available.
+- **Multi-source preview and export**: play the timeline in order, including cuts from different files. Export fits different frame sizes into a chosen canvas (original, landscape, portrait or square), uses the first clip's frame rate up to 60 fps, and inserts silence for clips without audio. Source changes during preview reopen the decoder and can briefly pause at a boundary; export renders the joined timeline in one pass.
 - **Trim**, **crop** (16:9, 9:16, 1:1, 4:3 or custom), **rotate**, **remove or replace the sound**.
 - **Cut out several parts and join them**: list the parts, see them on the seek bar, preview them back to back, export them as one video.
 - Trimming and sound changes are exported without re-encoding (fast, no quality loss); crop, rotation, joins and frame-exact cuts re-encode, on the CPU (x264) or on the GPU (NVENC, VAAPI) when the machine has one.
@@ -97,7 +100,8 @@ Viplyr/
 | `P` | Show / hide playlist |
 | `I` | Show / hide frame information |
 | `S` | Save the current frame as PNG |
-| `E` | Edit and export |
+| `E` / `Ctrl+E` | Open timeline editor |
+| `Shift+E` | Quick trim/crop/rotate export of the player video |
 | `R` | Rotate Video 90° |
 | `T` | Toggle Always on Top |
 | `Ctrl+O` / `Ctrl+U` | Add files / open a network URL |
@@ -134,6 +138,9 @@ to check that audio continues while the GUI event loop is blocked, plus pause, f
 and shutdown. It mutes its own stream and leaves the system volume unchanged.
 Pass `build/core/test_clip.mp4` as an argument to also check playback, pause, seek,
 speed changes and end-of-stream through the real audio backend.
+`make test` also checks non-destructive timeline operations and real mixed-source exports.
+With a display, `./build/app/editor_ui_tests build/core/test_clip.mp4 build/core/test_tracks.mkv`
+checks trim handles, split/undo, file drops, project round trips and preview order.
 
 When the screen can take GPU frames directly, the player decodes on the GPU and draws each frame without copying it through system memory: VAAPI frames are imported as DMA-BUF through EGL (Intel/AMD), NVDEC frames are copied GPU-to-GPU through CUDA/OpenGL interop (when OpenGL runs on the NVIDIA GPU). 4K 60 fps then takes about 10–15% of one CPU core instead of 1–2.5 cores. Otherwise it decodes on the CPU, which beats decoding on the GPU and reading the frames back. The start-up line `Viplyr: GPU frames shown without a CPU copy: ...` tells which path is in use. `VIPLYR_HWACCEL=none|vaapi|cuda` forces a decoder (frames then go through system memory). Editing needs the `ffmpeg` program.
 

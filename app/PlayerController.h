@@ -15,7 +15,7 @@
 // of the current video. The UI talks only to this class, in milliseconds.
 //
 // Videos are opened on a worker thread so the window never freezes. While one
-// is opening, playback commands are ignored and position() reports 0.
+// is opening, play/pause intent is retained and position() reports 0.
 class PlayerController : public QObject {
     Q_OBJECT
 public:
@@ -23,7 +23,7 @@ public:
     static constexpr int kSubtitlesOff = -2;
     static constexpr int kSubtitlesExternalFile = -1;
 
-    explicit PlayerController(QObject *parent = nullptr);
+    explicit PlayerController(QObject *parent = nullptr, bool rememberPositions = true);
     ~PlayerController() override;
 
     // Must be called before the first video is loaded.
@@ -48,6 +48,16 @@ public:
     qreal playbackRate() const { return rate_; }
     int subtitleTrack() const { return subtitleTrack_; }
     bool hasExternalSubtitles() const;
+
+    struct TimelineClip {
+        QString path;
+        qint64 inMs = 0;
+        qint64 outMs = 0;
+    };
+    // Editor preview uses source-relative cuts, without modifying the watch playlist.
+    void setTimeline(const QVector<TimelineClip> &clips, qint64 positionMs = 0);
+    void seekTimeline(qint64 positionMs, bool startPlaying = false);
+    void toggleTimeline();
 
 public slots:
     void play();
@@ -90,6 +100,7 @@ signals:
     void pictureSubtitlesChanged(std::shared_ptr<const viplyr::SubtitleTrackData> track);
     void errorOccurred(const QString &message);
     void loopChanged(qint64 startMs, qint64 endMs);  // -1 for a point not set
+    void timelinePositionChanged(qint64 milliseconds);
 
 private:
     struct OpenRequest {
@@ -118,6 +129,8 @@ private:
     void clearLoop();
     void jumpTo(qint64 milliseconds);  // a seek of our own: keeps the preview going
     qint64 rememberedPosition(const QString &path) const;
+    void advanceTimeline();
+    qint64 timelineStart(int index) const;
 
     viplyr::Player player_;
     viplyr::Playlist playlist_;
@@ -129,6 +142,7 @@ private:
     QFuture<void> openTask_;
     OpenRequest pendingRequest_;
     bool isOpening_ = false;
+    bool startPlayingAfterOpen_ = false;
     bool openTaskRunning_ = false;
     bool hasQueuedRequest_ = false;
     int openGeneration_ = 0;  // bumped to make an already queued completion do nothing
@@ -145,4 +159,8 @@ private:
     qint64 loopStartMs_ = -1;
     qint64 loopEndMs_ = -1;
     qreal rate_ = 1.0;
+    bool rememberPositions_ = true;
+    QVector<TimelineClip> timeline_;
+    int timelineIndex_ = -1;
+    qint64 timelinePositionMs_ = 0;
 };

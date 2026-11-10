@@ -46,7 +46,8 @@ QString resumeKey(const QString &path) {
 
 }  // namespace
 
-PlayerController::PlayerController(QObject *parent) : QObject(parent) {
+PlayerController::PlayerController(QObject *parent, bool rememberPositions)
+    : QObject(parent), rememberPositions_(rememberPositions) {
     if (audioOutput_.isAvailable()) player_.setAudioSink(&audioOutput_);
 
     // Engine callbacks arrive on engine threads; forward them to the GUI thread.
@@ -83,6 +84,8 @@ void PlayerController::addVideoSink(viplyr::IVideoSink *sink) {
 // ----------------------------------------------------------------- playlist
 
 void PlayerController::loadFiles(const QStringList &paths) {
+    timeline_.clear();
+    timelineIndex_ = -1;
     playlist_.assign(toStdStrings(paths));
     if (playlist_.count() > 0) openCurrent(true);
     else closeMedia();
@@ -151,6 +154,7 @@ void PlayerController::openCurrent(bool startPlaying, qint64 startPositionMs, in
     }
 
     pendingRequest_ = {currentPath(), startPlaying, startPositionMs, audioStreamIndex};
+    startPlayingAfterOpen_ = startPlaying;
     isOpening_ = true;
     openPath_.clear();
     setSubtitleText(QString());
@@ -208,7 +212,7 @@ void PlayerController::finishOpen(const OpenRequest &request, const OpenResult &
 
     emit mediaOpened(request.path);
     if (resuming && startMs > 0) emit resumed(startMs);
-    if (request.startPlaying) player_.play();
+    if (startPlayingAfterOpen_) player_.play();
 }
 
 void PlayerController::waitForOpenTask() {
@@ -237,6 +241,10 @@ void PlayerController::closeMedia() {
 
 void PlayerController::handleEnded() {
     if (isOpening_ || player_.state() != viplyr::State::Ended) return;  // a newer video took over
+    if (timelineIndex_ >= 0) {
+        advanceTimeline();
+        return;
+    }
     if (loopEndMs_ >= 0) {  // B at the very end of the video
         jumpTo(loopStartMs_);
         play();
@@ -248,14 +256,14 @@ void PlayerController::handleEnded() {
         return;
     }
     previewIndex_ = -1;
-    QSettings().remove(resumeKey(openPath_));  // watched to the end: start over next time
+    if (rememberPositions_) QSettings().remove(resumeKey(openPath_));
     if (playlist_.next()) openCurrent(true);
 }
 
 // ----------------------------------------------------------- resume position
 
 void PlayerController::rememberPosition() {
-    if (!hasMedia()) return;
+    if (!rememberPositions_ || !hasMedia()) return;
     const qint64 current = position();
     const qint64 total = duration();
     QSettings settings;
@@ -267,6 +275,7 @@ void PlayerController::rememberPosition() {
 }
 
 qint64 PlayerController::rememberedPosition(const QString &path) const {
+    if (!rememberPositions_) return 0;
     return QSettings().value(resumeKey(path), 0).toLongLong();
 }
 
@@ -384,16 +393,18 @@ bool PlayerController::hasMedia() const { return !isOpening_ && !openPath_.isEmp
 bool PlayerController::isPlaying() const { return hasMedia() && player_.state() == viplyr::State::Playing; }
 viplyr::MediaInfo PlayerController::mediaInfo() const { return hasMedia() ? player_.info() : viplyr::MediaInfo(); }
 
-void PlayerController::play() { if (hasMedia()) player_.play(); }
-void PlayerController::pause() { if (hasMedia()) player_.pause(); }
+void PlayerController::play() { startPlayingAfterOpen_ = true; if (hasMedia()) player_.play(); }
+void PlayerController::pause() { startPlayingAfterOpen_ = false; if (hasMedia()) player_.pause(); }
 
 void PlayerController::togglePlayback() {
+    if (isOpening_) { startPlayingAfterOpen_ = !startPlayingAfterOpen_; return; }
     if (!hasMedia()) return;
     if (isPlaying()) player_.pause();
     else player_.play();
 }
 
 void PlayerController::stop() {
+    startPlayingAfterOpen_ = false;
     if (!hasMedia()) return;
     player_.pause();
     player_.seek(0.0);
@@ -438,6 +449,19 @@ qint64 PlayerController::duration() const { return hasMedia() ? qRound64(player_
 
 void PlayerController::refreshPosition() {
     const qint64 current = position();
+    if (timelineIndex_ >= 0 && hasMedia()) {
+        const auto &clip = timeline_[timelineIndex_];
+        if (isPlaying() && current >= clip.outMs) {
+            advanceTimeline();
+            return;
+        }
+        const qint64 timelinePosition = timelineStart(timelineIndex_) +
+                                        std::clamp(current - clip.inMs, qint64(0), clip.outMs - clip.inMs);
+        if (timelinePosition != timelinePositionMs_) {
+            timelinePositionMs_ = timelinePosition;
+            emit timelinePositionChanged(timelinePositionMs_);
+        }
+    }
     if (previewIndex_ >= 0 && isPlaying() && current >= previewSegments_[previewIndex_].second) {
         if (++previewIndex_ < previewSegments_.size()) {
             jumpTo(previewSegments_[previewIndex_].first);
@@ -455,4 +479,69 @@ void PlayerController::refreshPosition() {
     lastPosition_ = current;
     emit positionChanged(current);
     setSubtitleText(subtitles_.textAt(current));
+}
+
+qint64 PlayerController::timelineStart(int index) const {
+    qint64 result = 0;
+    for (int i = 0; i < index; ++i) result += timeline_[i].outMs - timeline_[i].inMs;
+    return result;
+}
+
+void PlayerController::setTimeline(const QVector<TimelineClip> &clips, qint64 positionMs) {
+    pause();
+    timeline_.clear();
+    for (const auto &clip : clips) {
+        if (!clip.path.isEmpty() && clip.outMs > clip.inMs && clip.inMs >= 0) timeline_.append(clip);
+    }
+    timelineIndex_ = -1;
+    positionTimer_.setInterval(clips.isEmpty() ? kPositionIntervalMs : 20);
+    previewIndex_ = -1;
+    clearLoop();
+    if (timeline_.isEmpty()) {
+        closeMedia();
+        emit timelinePositionChanged(0);
+        return;
+    }
+    seekTimeline(positionMs);
+}
+
+void PlayerController::seekTimeline(qint64 positionMs, bool startPlaying) {
+    if (timeline_.isEmpty()) return;
+    const qint64 total = timelineStart(timeline_.size());
+    positionMs = std::clamp(positionMs, qint64(0), std::max<qint64>(0, total - 1));
+    qint64 offset = 0;
+    timelineIndex_ = 0;
+    for (int i = 0; i < timeline_.size(); ++i) {
+        const qint64 length = timeline_[i].outMs - timeline_[i].inMs;
+        if (positionMs < offset + length) { timelineIndex_ = i; break; }
+        offset += length;
+    }
+    const auto clip = timeline_[timelineIndex_];
+    const qint64 sourceMs = clip.inMs + positionMs - offset;
+    timelinePositionMs_ = positionMs;
+    if (hasMedia() && openPath_ == clip.path) {
+        pause();
+        jumpTo(sourceMs);
+        if (startPlaying) play();
+    } else {
+        playlist_.assign({clip.path.toStdString()});
+        openCurrent(startPlaying, sourceMs);
+    }
+    emit timelinePositionChanged(positionMs);
+}
+
+void PlayerController::toggleTimeline() {
+    if (isOpening_) { startPlayingAfterOpen_ = !startPlayingAfterOpen_; return; }
+    if (isPlaying()) pause();
+    else seekTimeline(timelinePositionMs_ >= timelineStart(timeline_.size()) ? 0 : timelinePositionMs_, true);
+}
+
+void PlayerController::advanceTimeline() {
+    if (timelineIndex_ + 1 < timeline_.size()) {
+        seekTimeline(timelineStart(timelineIndex_ + 1), true);
+    } else {
+        pause();
+        timelinePositionMs_ = timelineStart(timeline_.size());
+        emit timelinePositionChanged(timelinePositionMs_);
+    }
 }

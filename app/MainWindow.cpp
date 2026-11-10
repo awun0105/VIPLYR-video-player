@@ -25,6 +25,7 @@
 
 #include "ControlBar.h"
 #include "ExportDialog.h"
+#include "EditorDialog.h"
 #include "ExportJob.h"
 #include "JumpSlider.h"
 #include "MediaFiles.h"
@@ -156,6 +157,11 @@ void MainWindow::createExportProgress() {
             [this](bool succeeded, const QString &outputPath, const QString &error) {
                 exportProgress_->hide();
                 if (exportDialog_) exportDialog_->setExportRunning(false);
+                if (editorDialog_) {
+                    editorDialog_->setExportRunning(false);
+                    editorDialog_->setMessage(succeeded ? "Exported " + outputPath :
+                                              error.isEmpty() ? "Export cancelled." : "Export failed: " + error);
+                }
                 if (succeeded) videoWidget_->showMessage("Exported " + QFileInfo(outputPath).fileName());
                 else if (error.isEmpty()) videoWidget_->showMessage("Export cancelled");
                 else QMessageBox::critical(this, "Export failed", error);
@@ -166,6 +172,7 @@ void MainWindow::startExport(const ExportOptions &options, double totalSeconds) 
     if (exportJob_->isRunning()) return;
     exportJob_->start(options, totalSeconds);
     if (exportDialog_) exportDialog_->setExportRunning(true);
+    if (editorDialog_) editorDialog_->setExportRunning(true);
     exportProgressBar_->setValue(0);
     exportProgress_->adjustSize();
     exportProgress_->show();
@@ -203,7 +210,7 @@ void MainWindow::wireConnections() {
 
     // Control bar -> window tools
     connect(controlBar_, &ControlBar::tracksRequested, this, &MainWindow::showTracksMenu);
-    connect(controlBar_, &ControlBar::editRequested, this, &MainWindow::openExportDialog);
+    connect(controlBar_, &ControlBar::editRequested, this, &MainWindow::openVideoEditor);
     connect(controlBar_, &ControlBar::snapshotRequested, this, &MainWindow::saveSnapshot);
     connect(controlBar_, &ControlBar::playlistToggleRequested, this, &MainWindow::togglePlaylist);
     connect(controlBar_, &ControlBar::fullscreenRequested, this, &MainWindow::toggleFullscreen);
@@ -270,7 +277,9 @@ void MainWindow::createShortcuts() {
     bind(Qt::Key_P, [this] { togglePlaylist(); });
     bind(Qt::Key_I, [this] { toggleInfo(); });
     bind(Qt::Key_S, [this] { saveSnapshot(); });
-    bind(Qt::Key_E, [this] { openExportDialog(); });
+    bind(Qt::Key_E, [this] { openVideoEditor(); });
+    bind(Qt::CTRL | Qt::Key_E, [this] { openVideoEditor(); });
+    bind(Qt::SHIFT | Qt::Key_E, [this] { openExportDialog(); });
     bind(Qt::Key_L, [this] { controller_->cycleLoop(); });
     bind(Qt::Key_PageDown, [this] { controller_->seekChapter(1); });
     bind(Qt::Key_PageUp, [this] { controller_->seekChapter(-1); });
@@ -490,6 +499,46 @@ void MainWindow::showTracksMenu() {
     menu.exec(above);
 }
 
+void MainWindow::openVideoEditor() {
+    if (editorDialog_) {
+        editorDialog_->show();
+        editorDialog_->raise();
+        editorDialog_->activateWindow();
+        return;
+    }
+    controller_->pause();
+    auto *editor = new EditorDialog(this);
+    editorDialog_ = editor;
+    auto *preview = new PlayerController(editor, false);
+    preview->setVolume(controller_->volume());
+    preview->addVideoSink(editor->videoWidget());
+    preview->setGpuFramePath(VideoWidget::probeGpuFramePath());
+    connect(editor->videoWidget(), &VideoWidget::gpuFramePathChanged, preview, &PlayerController::setGpuFramePath);
+    connect(preview, &PlayerController::timelinePositionChanged, editor, &EditorDialog::setPosition);
+    connect(preview, &PlayerController::playingChanged, editor, &EditorDialog::setPlaying);
+    connect(preview, &PlayerController::errorOccurred, editor, &EditorDialog::setMessage);
+    connect(preview, &PlayerController::mediaOpened, editor, [editor, preview] {
+        const auto info = preview->mediaInfo();
+        editor->videoWidget()->setMediaGeometry(info.rotationDegrees, info.pixelAspectRatio);
+    });
+    connect(editor, &EditorDialog::timelineChanged, preview, [editor, preview] {
+        preview->setTimeline(editor->playbackClips(), editor->position());
+        if (editor->playbackClips().isEmpty()) editor->videoWidget()->clear();
+    });
+    connect(editor, &EditorDialog::seekRequested, preview, [preview](qint64 ms) { preview->seekTimeline(ms); });
+    connect(editor, &EditorDialog::playRequested, preview, &PlayerController::toggleTimeline);
+    // Stop the engine while the video widget is still alive, including parent-window teardown.
+    connect(editor, &EditorDialog::closing, preview, [preview] { preview->setTimeline({}); });
+    connect(editor, &EditorDialog::exportRequested, this, &MainWindow::startExport);
+    connect(editor, &EditorDialog::cancelExportRequested, exportJob_, &ExportJob::cancel);
+    connect(editor, &EditorDialog::quickExportRequested, this, &MainWindow::openExportDialog);
+    connect(exportJob_, &ExportJob::progressChanged, editor, &EditorDialog::setProgress);
+    editor->setExportRunning(exportJob_->isRunning());
+    editor->show();
+    const QString path = controller_->currentPath();
+    if (!path.isEmpty() && !path.contains("://")) editor->importPaths({path});
+}
+
 void MainWindow::openExportDialog() {
     if (!controller_->hasMedia()) return;
     if (exportDialog_) {
@@ -695,6 +744,7 @@ void MainWindow::setChromeVisible(bool visible) {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    if (editorDialog_ && !editorDialog_->close()) { event->ignore(); return; }
     saveSettings();
     QWidget::closeEvent(event);
 }

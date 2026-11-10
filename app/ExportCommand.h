@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QSize>
 
 // What the user asked the export to do. Turned into an ffmpeg command line by
 // buildFfmpegArguments(); nothing here touches the disk.
@@ -14,6 +15,9 @@ struct ExportOptions {
     struct Segment {
         double startSeconds = 0.0;
         double endSeconds = 0.0;    // 0 = until the end
+        QString inputPath;          // empty uses the project's inputPath (quick export)
+        bool inputHasAudio = true;
+        double sourceDurationSeconds = 0.0;
     };
 
     QString inputPath;
@@ -26,6 +30,8 @@ struct ExportOptions {
     QString replacementAudioPath;   // for Audio::Replace
     QRect crop;                     // in displayed video pixels; null = no crop
     int rotateDegrees = 0;          // extra clockwise rotation: 0, 90, 180 or 270
+    QSize outputSize;               // timeline export: fit/pad all sources to this canvas
+    double outputFrameRate = 30.0;
     Output output = Output::Video;
 
     // False when the streams can be copied as they are, which takes seconds and loses
